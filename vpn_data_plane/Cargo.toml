@@ -15,6 +15,9 @@ tokio-tun = "0.15.0"
 # A high-level, cross-platform library for managing WireGuard interfaces.
 defguard_wireguard_rs = "0.7.6"
 
+x25519-dalek = "2.0.0-rc.3"
+
 # Libraries for structured, event-based logging.
 tracing = "0.1"
 tracing-subscriber = "0.3"
+base64 = "0.22.1"

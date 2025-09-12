@@ -1,50 +1,73 @@
 //! Main entry point for the VPN Data Plane service.
-//! This service is responsible for creating a virtual TUN network interface,
-//! configuring it with WireGuard, and processing all encrypted network packets
-//! at high speed.
+//! This service is responsible for creating and managing a WireGuard interface
+//! using a userspace implementation.
 
+use defguard_wireguard_rs::{InterfaceConfiguration, Userspace, WGApi, WireguardInterfaceApi};
 use std::error::Error;
-use tokio_tun::TunBuilder;
+use x25519_dalek::{PublicKey, StaticSecret};
 
-// This is the main entry point for our asynchronous application.
-// The #[tokio::main] attribute transforms the async main function
-// into a synchronous main function that sets up and runs the Tokio runtime.
+// The base64 crate is brought in as a dependency of defguard_wireguard_rs,
+// but we need to explicitly use it for key handling.
+use base64::{engine::general_purpose, Engine as _};
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    // Initialize the tracing subscriber for structured logging.
-    // This allows us to see what's happening inside the application.
     tracing_subscriber::fmt::init();
-
     tracing::info!("Initializing VPN Data Plane...");
 
-    // --- Step 1: Create an asynchronous TUN interface ---
-    // This creates a new virtual network interface. We give it a name,
-    // set the IP address and netmask for our side of the tunnel, and bring it up.
-    // On Linux, this will create a device like 'tun0'. You'll need to run this
-    // with `sudo` for it to have the necessary permissions to create the interface.
-    let tun = TunBuilder::new()
-        .name("wg0") // Interface name
-        .up() // Bring the interface up
-        .build()?;
+    // Define the name for our WireGuard network interface.
+    let ifname: String = if cfg!(target_os = "linux") || cfg!(target_os = "freebsd") {
+        "wg0".into()
+    } else {
+        // macOS uses a different naming convention for TUN devices.
+        "utun3".into()
+    };
 
-    let tun = tun.into_iter().next().unwrap();
-    
-    tracing::info!("Successfully created TUN device: {}", tun.name());
+    // --- Step 1 & 2: Create and Configure the WireGuard Interface ---
 
-    // --- TODO: Step 2 ---
-    // Initialize and configure the WireGuard backend using `defguard_wireguard_rs`.
-    // This involves setting up the private key for the server and the listen port.
+    // In a real application, this private key would be loaded securely.
+    // NOTE: This key is a placeholder and must be 32 bytes, base64-encoded.
+    let server_private_key_b64 = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=";
+    let server_private_key_bytes: [u8; 32] = general_purpose::STANDARD.decode(server_private_key_b64)?
+        .try_into()
+        .expect("Private key is not 32 bytes long after base64 decoding");
 
-    // --- TODO: Step 3 ---
-    // Connect the TUN interface with the WireGuard backend. This is the core loop
-    // where we will read packets from the TUN device, pass them to WireGuard for
-    // encryption/decryption, and send them out to the internet (and vice-versa).
+    let secret = StaticSecret::from(server_private_key_bytes);
+    let public_key = PublicKey::from(&secret);
 
-    tracing::info!("VPN Data Plane is running. (TUN device created)");
+    // The WGApi is the main entry point for managing the interface.
+    // We specify `<Userspace>` to use the cross-platform userspace backend.
+    let wgapi = WGApi::<Userspace>::new(ifname.clone())?;
 
-    // The application will now wait indefinitely. We will replace this later
-    // with the main packet processing loop.
+    // Create the low-level OS network interface (e.g., a TUN device).
+    wgapi.create_interface()?;
+
+    // Define the configuration for our WireGuard interface.
+    let config = InterfaceConfiguration {
+        name: ifname,
+        prvkey: server_private_key_b64.to_string(),
+        // IP address for the server side of the tunnel.
+        addresses: vec!["10.10.10.1/24".parse()?],
+        port: 51820,
+        peers: vec![], // No client peers configured yet.
+        mtu: None,
+    };
+
+    // Apply the configuration to the interface. This brings the WireGuard tunnel online.
+    wgapi.configure_interface(&config)?;
+
+    tracing::info!(
+        "WireGuard backend initialized. Public Key: {}",
+    general_purpose::STANDARD.encode(public_key.as_bytes())
+    );
+    tracing::info!("VPN Data Plane is running. Listening on UDP port 51820.");
+
+    // The defguard library now handles packet processing in the background.
+    // We just need to keep the main thread alive.
     tokio::time::sleep(tokio::time::Duration::from_secs(u64::MAX)).await;
+
+    // In a real app, you'd also want a graceful shutdown mechanism.
+    // wgapi.remove_interface()?;
 
     Ok(())
 }
