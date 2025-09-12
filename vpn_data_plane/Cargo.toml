@@ -1,0 +1,20 @@
+[package]
+name = "vpn_data_plane"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+# The asynchronous runtime for building high-performance network applications.
+tokio = { version = "1", features = ["full"] }
+
+# Crate for creating and managing asynchronous TUN/TAP virtual network interfaces.
+tokio-tun = "0.15.0"
+
+# A high-level, cross-platform library for managing WireGuard interfaces.
+defguard_wireguard_rs = "0.7.6"
+
+# Libraries for structured, event-based logging.
+tracing = "0.1"
+tracing-subscriber = "0.3"
