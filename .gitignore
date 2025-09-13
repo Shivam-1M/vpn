@@ -1,0 +1,53 @@
+# Top-level .gitignore for the VPN project
+
+# Ignore OS files
+.DS_Store
+Thumbs.db
+
+# IDE and editor folders
+.vscode/
+.idea/
+*.swp
+*.swo
+*.tmp
+*.log
+
+# Rust (vpn_data_plane)
+target/
+Cargo.lock
+**/*.rs.bk
+
+# Go (vpn_control_plane)
+bin/
+*.exe
+*.test
+*.out
+*.mod
+*.sum
+# Go build cache
+go-build/
+
+# General backup and temp files
+*~
+*.bak
+*.old
+*.orig
+
+# Node/npm (if ever used)
+node_modules/
+
+# Coverage and test output
+coverage/
+*.coverprofile
+*.lcov
+
+# Ignore by language
+*.pyc
+__pycache__/
+
+# Ignore by convention
+.env
+.env.*
+
+# Ignore all at root that should not be versioned
+!.gitignore
