@@ -1,3 +1,72 @@
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Editor/IDE folders and files
+.vscode/
+.idea/
+*.swp
+*.swo
+*.tmp
+*.log
+*~
+*.bak
+*.old
+*.orig
+
+# Rust (vpn_data_plane)
+target/
+Cargo.lock
+Cargo.toml
+build.rs
+**/*.rs.bk
+*.d
+*.rlib
+*.rmeta
+*.so
+*.json
+
+# Go (vpn_control_plane)
+bin/
+*.exe
+*.test
+*.out
+go-build/
+*.mod
+*.sum
+main.go
+docker-compose.yml
+docker-compose.override.yml
+docker-compose.*.yml
+
+# Protobuf and gRPC generated files
+*.pb.go
+*.pb.rs
+*.proto
+
+# Database volumes
+postgres_data/
+
+# Keys and secrets
+client.key
+client.pub
+.env
+.env.*
+
+# Node/npm (if ever used)
+node_modules/
+
+# Coverage and test output
+coverage/
+*.coverprofile
+*.lcov
+
+# Python (if ever used)
+*.pyc
+__pycache__/
+
+# Ignore all at root that should not be versioned
+!.gitignore
 
 # Top-level .gitignore for the VPN project
 

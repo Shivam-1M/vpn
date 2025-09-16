@@ -6,6 +6,8 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+log ={ version = "0.4", features = ["std"] }
+
 # The asynchronous runtime for building high-performance network applications.
 tokio = { version = "1", features = ["full"] }
 
@@ -21,3 +23,15 @@ x25519-dalek = "2.0.0-rc.3"
 tracing = "0.1"
 tracing-subscriber = "0.3"
 base64 = "0.22.1"
+
+# gRPC dependencies
+tonic = "0.14.2"
+prost = "0.14.1"
+tokio-stream = "0.1"
+
+env_logger = "0.11.8"
+tonic-prost = "0.14.2"
+
+[build-dependencies]
+# Build-time dependency for compiling .proto files
+tonic-prost-build = "0.14.2"
