@@ -1,177 +1,180 @@
-//! This is the shared core logic library for the VPN client.
-//! It will be compiled as a C-compatible dynamic library so that native
-//! frontends (like C++/Qt) can call its functions to manage the VPN connection.
-
+use base64::{engine::general_purpose, Engine as _};
 use defguard_wireguard_rs::{
     host::Peer, key::Key, InterfaceConfiguration, Userspace, WGApi, WireguardInterfaceApi,
 };
-use std::ffi::{c_char, CStr};
-use std::net::SocketAddr;
+use std::ffi::{c_char, c_int, CStr};
 use tokio::runtime::Runtime;
 
-/// Opaque struct to hold the state of the VPN client, including the WireGuard
-/// API object and the Tokio runtime needed to execute async operations.
+// The VpnClient struct now holds an Option<WGApi>.
+// This allows us to have a state where the WGApi object doesn't exist (i.e., disconnected).
 pub struct VpnClient {
-    wgapi: WGApi<Userspace>,
     runtime: Runtime,
-    // Store the interface name for later use.
     ifname: String,
+    wgapi: Option<WGApi<Userspace>>,
 }
 
-/// Creates and initializes a new VpnClient instance.
-///
-/// This function must be called first. The returned pointer must be passed to
-/// subsequent calls and finally to `vpn_client_destroy` to prevent memory leaks.
-///
-/// # Returns
-/// A raw pointer to the VpnClient instance, or a null pointer if initialization fails.
 #[no_mangle]
 pub extern "C" fn vpn_client_create() -> *mut VpnClient {
-    // We need a multithreaded Tokio runtime to drive the async WireGuard code.
-    let runtime = match Runtime::new() {
-        Ok(rt) => rt,
-        Err(_) => return std::ptr::null_mut(),
-    };
-
-    // The interface name is specific to the OS.
-    let ifname: String = if cfg!(target_os = "linux") || cfg!(target_os = "freebsd") {
+    // **FIX:** Use a unique name for the client interface to avoid conflicts with the server.
+    let ifname = if cfg!(target_os = "linux") || cfg!(target_os = "freebsd") {
         "wg_client".into()
     } else {
-        "utun4".into() // Use a different name than the server if running on the same machine
+        "utun4".into()
     };
 
-    let wgapi = match WGApi::<Userspace>::new(ifname.clone()) {
-        Ok(api) => api,
-        Err(_) => return std::ptr::null_mut(),
-    };
-
-    let client = VpnClient {
-        wgapi,
-        runtime,
-        ifname,
-    };
-
-    // Box the client to place it on the heap, then return a raw pointer.
-    // The caller is now responsible for this memory.
-    Box::into_raw(Box::new(client))
-}
-
-/// Connects the VPN tunnel with the given configuration.
-///
-/// # Arguments
-/// * `client` - A pointer returned by `vpn_client_create`.
-/// * `private_key` - The client's private WireGuard key (base64 encoded).
-/// * `client_ip` - The internal IP address for the client (e.g., "10.10.10.2/32").
-/// * `server_pubkey` - The server's public WireGuard key (base64 encoded).
-/// * `server_endpoint` - The server's public IP address and port (e.g., "1.2.3.4:51820").
-///
-/// # Returns
-/// 0 on success, -1 on failure.
-///
-/// # Safety
-/// The function is unsafe because it dereferences raw pointers and deals with C strings.
-/// All C string pointers must be valid, null-terminated UTF-8 strings.
-#[no_mangle]
-pub unsafe extern "C" fn vpn_client_connect(
-    client: *mut VpnClient,
-    private_key: *const c_char,
-    client_ip: *const c_char,
-    server_pubkey: *const c_char,
-    server_endpoint: *const c_char,
-) -> i32 {
-    // Ensure the client pointer is not null.
-    let client = if let Some(c) = client.as_mut() {
-        c
-    } else {
-        return -1;
-    };
-
-    // Safely convert C strings to Rust strings.
-    let private_key = CStr::from_ptr(private_key).to_str().unwrap_or_default();
-    let client_ip = CStr::from_ptr(client_ip).to_str().unwrap_or_default();
-    let server_pubkey = CStr::from_ptr(server_pubkey).to_str().unwrap_or_default();
-    let server_endpoint_str = CStr::from_ptr(server_endpoint).to_str().unwrap_or_default();
-    let server_endpoint: SocketAddr = server_endpoint_str.parse().unwrap();
-
-    let server_pubkey_bytes: [u8; 32] =
-        match base64::Engine::decode(&base64::engine::general_purpose::STANDARD, server_pubkey) {
-            Ok(bytes) if bytes.len() == 32 => bytes.try_into().unwrap(),
-            _ => return -1,
-        };
-
-    // Configure the peer (the server).
-    // Correctly create a Key struct before passing it to Peer::new.
-    let server_pubkey = Key::new(server_pubkey_bytes);
-    let mut peer = Peer::new(server_pubkey);
-    peer.endpoint = Some(server_endpoint);
-    // Route all traffic through the VPN.
-    peer.allowed_ips.push("0.0.0.0/0".parse().unwrap());
-
-    // Configure the client's interface.
-    let config = InterfaceConfiguration {
-        // Use the stored interface name.
-        name: client.ifname.clone(),
-        prvkey: private_key.to_string(),
-        addresses: vec![client_ip.parse().unwrap()],
-        peers: vec![peer],
-        port: 0, // Let the OS choose the port
-        mtu: None,
-    };
-
-    // Use the Tokio runtime to execute the async connection logic.
-    client.runtime.block_on(async {
-        if client.wgapi.create_interface().is_err() {
-            return -1;
+    match Runtime::new() {
+        Ok(runtime) => {
+            let client = VpnClient {
+                runtime,
+                ifname,
+                wgapi: None, // Start in a disconnected state
+            };
+            Box::into_raw(Box::new(client))
         }
-        if client.wgapi.configure_interface(&config).is_err() {
-            return -1;
+        Err(e) => {
+            eprintln!("[VPN_CORE] Failed to create Tokio runtime: {:?}", e);
+            std::ptr::null_mut()
         }
-        0
-    })
-}
-
-/// Disconnects the VPN tunnel.
-///
-/// # Arguments
-/// * `client` - A pointer returned by `vpn_client_create`.
-///
-/// # Returns
-/// 0 on success, -1 on failure.
-///
-/// # Safety
-/// The function is unsafe because it dereferences a raw pointer.
-#[no_mangle]
-pub unsafe extern "C" fn vpn_client_disconnect(client: *mut VpnClient) -> i32 {
-    let client = if let Some(c) = client.as_mut() {
-        c
-    } else {
-        return -1;
-    };
-
-    client.runtime.block_on(async {
-        if client.wgapi.remove_interface().is_err() {
-            -1
-        } else {
-            0
-        }
-    })
-}
-
-/// Destroys the VpnClient instance and frees its memory.
-///
-/// This function must be called to clean up when the VPN client is no longer needed.
-///
-/// # Arguments
-/// * `client` - A pointer returned by `vpn_client_create`.
-///
-/// # Safety
-/// The function is unsafe because it dereferences a raw pointer. After this call,
-/// the pointer is dangling and must not be used again.
-#[no_mangle]
-pub unsafe extern "C" fn vpn_client_destroy(client: *mut VpnClient) {
-    if !client.is_null() {
-        // Re-box the raw pointer to allow Rust's memory management to take over and drop it.
-        drop(Box::from_raw(client));
     }
 }
 
+#[no_mangle]
+pub unsafe extern "C" fn vpn_client_destroy(client_ptr: *mut VpnClient) {
+    if !client_ptr.is_null() {
+        // Taking ownership back from the raw pointer to allow Rust to drop it.
+        // This will trigger the Drop implementation on WGApi if it still exists.
+        let _ = Box::from_raw(client_ptr);
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn vpn_client_connect(
+    client_ptr: *mut VpnClient,
+    client_privkey: *const c_char,
+    client_ip: *const c_char,
+    server_pubkey: *const c_char,
+    server_endpoint: *const c_char,
+) -> c_int {
+    if client_ptr.is_null() {
+        eprintln!("[VPN_CORE] vpn_client_connect called with null client pointer");
+        return -1;
+    }
+    let client = unsafe { &mut *client_ptr };
+
+    // --- Convert C strings to Rust strings ---
+    let client_privkey = unsafe { CStr::from_ptr(client_privkey) }
+        .to_str()
+        .unwrap_or("");
+    let client_ip = unsafe { CStr::from_ptr(client_ip) }.to_str().unwrap_or("");
+    let server_pubkey = unsafe { CStr::from_ptr(server_pubkey) }
+        .to_str()
+        .unwrap_or("");
+    let server_endpoint = unsafe { CStr::from_ptr(server_endpoint) }
+        .to_str()
+        .unwrap_or("");
+
+    if client_privkey.is_empty()
+        || client_ip.is_empty()
+        || server_pubkey.is_empty()
+        || server_endpoint.is_empty()
+    {
+        eprintln!("[VPN_CORE] One or more connection parameters are empty");
+        return -1;
+    }
+
+    // Proactively clean up any old interface before connecting.
+    if let Ok(cleanup_api) = WGApi::<Userspace>::new(client.ifname.clone()) {
+        let _ = cleanup_api.remove_interface();
+    }
+
+    let client_address = match client_ip.parse() {
+        Ok(addr) => addr,
+        Err(e) => {
+            eprintln!(
+                "[VPN_CORE] Failed to parse client_ip '{}': {:?}",
+                client_ip, e
+            );
+            return -2;
+        }
+    };
+    let server_socket_addr = match server_endpoint.parse() {
+        Ok(addr) => addr,
+        Err(e) => {
+            eprintln!(
+                "[VPN_CORE] Failed to parse server_endpoint '{}': {:?}",
+                server_endpoint, e
+            );
+            return -3;
+        }
+    };
+
+    client.runtime.block_on(async {
+        let new_wgapi = match WGApi::<Userspace>::new(client.ifname.clone()) {
+            Ok(api) => api,
+            Err(e) => {
+                eprintln!("[VPN_CORE] Failed to create WGApi: {:?}", e);
+                return -4;
+            }
+        };
+
+        let server_pubkey_bytes: [u8; 32] = match general_purpose::STANDARD.decode(server_pubkey) {
+            Ok(bytes) if bytes.len() == 32 => bytes.try_into().unwrap(),
+            Ok(bytes) => {
+                eprintln!(
+                    "[VPN_CORE] Decoded server public key has invalid length: {}",
+                    bytes.len()
+                );
+                return -5;
+            }
+            Err(e) => {
+                eprintln!("[VPN_CORE] Failed to decode server public key: {:?}", e);
+                return -5;
+            }
+        };
+
+        let server_pubkey_key = Key::new(server_pubkey_bytes);
+        let mut peer = Peer::new(server_pubkey_key);
+        peer.endpoint = Some(server_socket_addr);
+        peer.allowed_ips.push("0.0.0.0/0".parse().unwrap());
+
+        let config = InterfaceConfiguration {
+            name: client.ifname.clone(),
+            prvkey: client_privkey.to_string(),
+            addresses: vec![client_address],
+            port: 0,
+            peers: vec![peer],
+            mtu: None,
+        };
+
+        if let Err(e) = new_wgapi.create_interface() {
+            eprintln!("[VPN_CORE] Failed to create network interface: {:?}", e);
+            return -6;
+        }
+        if let Err(e) = new_wgapi.configure_interface(&config) {
+            eprintln!(
+                "[VPN_CORE] Failed to configure WireGuard interface: {:?}",
+                e
+            );
+            let _ = new_wgapi.remove_interface();
+            return -7;
+        }
+
+        client.wgapi = Some(new_wgapi);
+        0 // Success
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn vpn_client_disconnect(client_ptr: *mut VpnClient) -> c_int {
+    if client_ptr.is_null() {
+        return -1;
+    }
+    let client = unsafe { &mut *client_ptr };
+
+    if let Some(wgapi) = client.wgapi.take() {
+        // Dropping the wgapi object automatically triggers its cleanup.
+        drop(wgapi);
+    }
+
+    0 // Success
+}
