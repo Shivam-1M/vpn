@@ -46,6 +46,14 @@ type DeviceRequest struct {
 	PublicKey string `json:"public_key"`
 }
 
+// ADD THIS STRUCT
+type VpnConfigResponse struct {
+	ClientPrivateKey string `json:"client_private_key"`
+	ClientIp         string `json:"client_ip"`
+	ServerPublicKey  string `json:"server_public_key"`
+	ServerEndpoint   string `json:"server_endpoint"`
+}
+
 // --- Global Variables ---
 
 var db *gorm.DB
@@ -87,6 +95,8 @@ func main() {
 	http.HandleFunc("/login", loginHandler)
 	// We wrap the addDeviceHandler with our JWT middleware to protect it.
 	http.Handle("/devices", jwtMiddleware(http.HandlerFunc(addDeviceHandler)))
+	// ADD THIS ROUTE
+	http.Handle("/config", jwtMiddleware(http.HandlerFunc(getConfigHandler)))
 
 	log.Println("Starting VPN Control Plane server on http://localhost:8080")
 	if err := http.ListenAndServe(":8080", nil); err != nil {
@@ -207,6 +217,26 @@ func addDeviceHandler(w http.ResponseWriter, r *http.Request) {
 		"status":  res.Message,
 	})
 	log.Printf("Added new device for user %s with public key %s", email, devReq.PublicKey)
+}
+
+// ADD THIS ENTIRE FUNCTION
+func getConfigHandler(w http.ResponseWriter, r *http.Request) {
+	// The user's email is added to the request context by the middleware.
+	email := r.Context().Value(contextKey("userEmail")).(string)
+	log.Printf("Config requested for user: %s", email)
+
+	// In a real application, you would look up the user's device configuration
+	// from the database here. For now, we'll return the hardcoded values.
+	config := VpnConfigResponse{
+		ClientPrivateKey: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=", // Placeholder
+		ClientIp:         "10.10.10.2/32",
+		ServerPublicKey:  "j0DFrbaPJWJK5bIU6nZ6bslNgp09e14a0bpvPiE4KF8=", // The public key from your Rust server
+		ServerEndpoint:   "127.0.0.1:51820",                              // Your server's public IP
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(config)
 }
 
 // --- Middleware ---

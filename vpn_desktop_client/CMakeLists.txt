@@ -14,7 +14,8 @@ set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTORCC ON)
 
 # Find the required Qt6 packages. We need Core, GUI, and Widgets for a desktop app.
-find_package(Qt6 COMPONENTS Core Gui Widgets REQUIRED)
+# ADD Qt6::Network TO THIS LINE
+find_package(Qt6 COMPONENTS Core Gui Widgets Network REQUIRED)
 
 # Find the PNG library, which QtGui depends on. This is the fix.
 find_package(PNG REQUIRED)
@@ -52,7 +53,7 @@ target_link_libraries(VpnDesktopClient
   Qt6::Core
   Qt6::Gui
   Qt6::Widgets
+  Qt6::Network # ADD THIS LINE
   ${PNG_LIBRARIES} # Link the PNG library to resolve the errors.
   ${VPN_CORE_LIB}  # Link our Rust core library
 )
-

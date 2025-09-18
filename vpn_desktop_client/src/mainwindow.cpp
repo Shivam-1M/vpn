@@ -16,10 +16,15 @@ MainWindow::MainWindow(QWidget *parent)
         QMessageBox::critical(this, "Error", "Failed to initialize VPN client core.");
         // Disable the button if the core library failed to load.
         ui->connectButton->setEnabled(false);
+        ui->loginGroup->setEnabled(false);
     }
 
-    // Connect the button's clicked signal to our handler slot.
+    // Initialize the network manager
+    networkManager = new QNetworkAccessManager(this);
+
+    // Connect the buttons' clicked signals to our handler slots.
     connect(ui->connectButton, &QPushButton::clicked, this, &MainWindow::onConnectButtonClicked);
+    connect(ui->loginButton, &QPushButton::clicked, this, &MainWindow::onLoginButtonClicked);
 }
 
 MainWindow::~MainWindow()
@@ -36,18 +41,108 @@ MainWindow::~MainWindow()
     delete ui;
 }
 
+void MainWindow::onLoginButtonClicked()
+{
+    QString email = ui->emailLineEdit->text();
+    QString password = ui->passwordLineEdit->text();
+
+    if (email.isEmpty() || password.isEmpty())
+    {
+        QMessageBox::warning(this, "Login Failed", "Please enter both email and password.");
+        return;
+    }
+
+    // Create the JSON payload
+    QJsonObject json;
+    json["email"] = email;
+    json["password"] = password;
+    QJsonDocument doc(json);
+    QByteArray data = doc.toJson();
+
+    // Create and send the request
+    QNetworkRequest request(QUrl("http://localhost:8080/login"));
+    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+
+    QNetworkReply *reply = networkManager->post(request, data);
+    connect(reply, &QNetworkReply::finished, this, [=]()
+            { onLoginReplyFinished(reply); });
+}
+
+void MainWindow::onLoginReplyFinished(QNetworkReply *reply)
+{
+    if (reply->error() == QNetworkReply::NoError)
+    {
+        QByteArray response_data = reply->readAll();
+        QJsonDocument jsonDoc = QJsonDocument::fromJson(response_data);
+        QJsonObject jsonObj = jsonDoc.object();
+
+        if (jsonObj.contains("token") && jsonObj["token"].isString())
+        {
+            jwtToken = jsonObj["token"].toString();
+            QMessageBox::information(this, "Login Success", "Successfully logged in!");
+
+            // Now get the VPN config
+            QNetworkRequest request(QUrl("http://localhost:8080/config"));
+            QString authHeader = "Bearer " + jwtToken;
+            request.setRawHeader("Authorization", authHeader.toUtf8());
+
+            QNetworkReply *configReply = networkManager->get(request);
+            connect(configReply, &QNetworkReply::finished, this, [=]()
+                    { onConfigReplyFinished(configReply); });
+        }
+        else
+        {
+            QMessageBox::critical(this, "Login Failed", "Invalid response from server.");
+        }
+    }
+    else
+    {
+        QMessageBox::critical(this, "Login Failed", "Error: " + reply->errorString());
+    }
+    reply->deleteLater();
+}
+
+void MainWindow::onConfigReplyFinished(QNetworkReply *reply)
+{
+    if (reply->error() == QNetworkReply::NoError)
+    {
+        QByteArray response_data = reply->readAll();
+        QJsonDocument jsonDoc = QJsonDocument::fromJson(response_data);
+        QJsonObject jsonObj = jsonDoc.object();
+
+        // Populate our config struct
+        vpnConfig.clientPrivateKey = jsonObj["client_private_key"].toString();
+        vpnConfig.clientIp = jsonObj["client_ip"].toString();
+        vpnConfig.serverPublicKey = jsonObj["server_public_key"].toString();
+        vpnConfig.serverEndpoint = jsonObj["server_endpoint"].toString();
+
+        if (vpnConfig.clientPrivateKey.isEmpty() || vpnConfig.serverEndpoint.isEmpty())
+        {
+            QMessageBox::critical(this, "Config Error", "Failed to parse VPN configuration from server.");
+            return;
+        }
+
+        QMessageBox::information(this, "Config Received", "VPN configuration loaded successfully.");
+        ui->connectButton->setEnabled(true); // Enable the connect button
+        ui->loginGroup->setEnabled(false);   // Disable the login group
+    }
+    else
+    {
+        QMessageBox::critical(this, "Config Error", "Could not fetch VPN config: " + reply->errorString());
+    }
+    reply->deleteLater();
+}
+
 void MainWindow::onConnectButtonClicked()
 {
     if (!isConnected)
     {
-        // --- Hardcoded values for testing ---
-        // In a real app, these would come from the Go API and user input.
-        const char *clientPrivateKey = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="; // Placeholder
-        const char *clientIp = "10.10.10.2/32";
-        const char *serverPublicKey = "j0DFrbaPJWJK5bIU6nZ6bslNgp09e14a0bpvPiE4KF8="; // The public key from your Rust server
-        const char *serverEndpoint = "127.0.0.1:51820";                               // Your server's public IP
-
-        if (vpn_client_connect(vpnClient, clientPrivateKey, clientIp, serverPublicKey, serverEndpoint) == 0)
+        // Use the config we fetched from the server
+        if (vpn_client_connect(vpnClient,
+                               vpnConfig.clientPrivateKey.toStdString().c_str(),
+                               vpnConfig.clientIp.toStdString().c_str(),
+                               vpnConfig.serverPublicKey.toStdString().c_str(),
+                               vpnConfig.serverEndpoint.toStdString().c_str()) == 0)
         {
             ui->statusLabel->setText("Status: Connected");
             ui->connectButton->setText("Disconnect");
