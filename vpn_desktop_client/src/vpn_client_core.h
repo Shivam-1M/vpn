@@ -8,18 +8,20 @@
 // us to call them from C++.
 
 #ifdef __cplusplus
-extern "C" {
+extern "C"
+{
 #endif
 
-// Define an opaque pointer for the VpnClient struct. C++ doesn't need to know
-// its internal layout, only that it's a pointer.
-typedef struct VpnClient VpnClient;
+    // Define an opaque pointer for the VpnClient struct. C++ doesn't need to know
+    // its internal layout, only that it's a pointer.
+    typedef struct VpnClient VpnClient;
 
-// Declare the functions from the Rust library.
-VpnClient* vpn_client_create();
-int32_t vpn_client_connect(VpnClient* client, const char* private_key, const char* client_ip, const char* server_pubkey, const char* server_endpoint);
-int32_t vpn_client_disconnect(VpnClient* client);
-void vpn_client_destroy(VpnClient* client);
+    // Declare the functions from the Rust library.
+    VpnClient *vpn_client_create();
+    // UPDATE THIS LINE
+    int32_t vpn_client_connect(VpnClient *client, const char *private_key, const char *client_ip, const char *dns_server, const char *server_pubkey, const char *server_endpoint);
+    int32_t vpn_client_disconnect(VpnClient *client);
+    void vpn_client_destroy(VpnClient *client);
 
 #ifdef __cplusplus
 }

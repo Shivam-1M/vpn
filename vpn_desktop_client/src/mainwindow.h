@@ -2,10 +2,10 @@
 #define MAINWINDOW_H
 
 #include <QMainWindow>
-#include <QNetworkAccessManager> // ADD THIS
-#include <QNetworkReply>         // ADD THIS
-#include <QJsonObject>           // ADD THIS
-#include <QJsonDocument>         // ADD THIS
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
+#include <QJsonObject>
+#include <QJsonDocument>
 
 #include "vpn_client_core.h" // Include our Rust library header
 
@@ -28,7 +28,6 @@ public:
 private slots:
     // Slot to handle the connect button click.
     void onConnectButtonClicked();
-    // ADD THESE
     void onLoginButtonClicked();
     void onLoginReplyFinished(QNetworkReply *reply);
     void onConfigReplyFinished(QNetworkReply *reply);
@@ -43,15 +42,15 @@ private:
     // State variable to track connection status.
     bool isConnected;
 
-    // ADD THESE
     QNetworkAccessManager *networkManager;
     QString jwtToken;
 
-    // ADD THIS STRUCT to hold config
+    // UPDATE THIS STRUCT
     struct VpnConfig
     {
         QString clientPrivateKey;
         QString clientIp;
+        QString dnsServer; // ADD THIS
         QString serverPublicKey;
         QString serverEndpoint;
     } vpnConfig;

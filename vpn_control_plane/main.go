@@ -3,11 +3,11 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"fmt" // ADD THIS
+	"fmt"
 	"log"
 	"net/http"
 	"strings"
-	"sync" // ADD THIS
+	"sync"
 	"time"
 
 	pb "vpn_control_plane/vpn" // Import our generated protobuf package
@@ -87,9 +87,11 @@ type DeviceRequest struct {
 	PublicKey string `json:"public_key"`
 }
 
+// UPDATE THIS STRUCT
 type VpnConfigResponse struct {
 	ClientPrivateKey string `json:"client_private_key"`
 	ClientIp         string `json:"client_ip"`
+	DnsServer        string `json:"dns_server"` // ADD THIS
 	ServerPublicKey  string `json:"server_public_key"`
 	ServerEndpoint   string `json:"server_endpoint"`
 }
@@ -98,7 +100,7 @@ type VpnConfigResponse struct {
 
 var db *gorm.DB
 var vpnClient pb.VpnManagerClient // gRPC client
-var ipam *Ipam                    // ADD THIS
+var ipam *Ipam
 
 // IMPORTANT: In a real production app, use a secure, randomly generated key from a config file or env var.
 var jwtKey = []byte("my_secret_key")
@@ -108,7 +110,7 @@ var jwtKey = []byte("my_secret_key")
 func main() {
 	// Initialize IPAM
 	// We'll reserve IPs from 10.10.10.2 to 10.10.10.254
-	ipam = NewIpam("10.10.10.0/24", 2, 254) // ADD THIS
+	ipam = NewIpam("10.10.10.0/24", 2, 254)
 
 	// --- Database Connection ---
 	var err error
@@ -263,6 +265,7 @@ func addDeviceHandler(w http.ResponseWriter, r *http.Request) {
 	log.Printf("Added new device for user %s with public key %s", email, devReq.PublicKey)
 }
 
+// UPDATE THIS FUNCTION
 func getConfigHandler(w http.ResponseWriter, r *http.Request) {
 	// The user's email is added to the request context by the middleware.
 	email := r.Context().Value(contextKey("userEmail")).(string)
@@ -282,6 +285,7 @@ func getConfigHandler(w http.ResponseWriter, r *http.Request) {
 	config := VpnConfigResponse{
 		ClientPrivateKey: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=", // Placeholder
 		ClientIp:         clientIP,
+		DnsServer:        "1.1.1.1",                                      // A good, private DNS resolver. Can also be your own.
 		ServerPublicKey:  "j0DFrbaPJWJK5bIU6nZ6bslNgp09e14a0bpvPiE4KF8=", // The public key from your Rust server
 		ServerEndpoint:   "127.0.0.1:51820",                              // Your server's public IP
 	}

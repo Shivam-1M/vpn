@@ -47,11 +47,13 @@ pub unsafe extern "C" fn vpn_client_destroy(client_ptr: *mut VpnClient) {
     }
 }
 
+// UPDATE THIS FUNCTION SIGNATURE
 #[no_mangle]
 pub extern "C" fn vpn_client_connect(
     client_ptr: *mut VpnClient,
     client_privkey: *const c_char,
     client_ip: *const c_char,
+    dns_server: *const c_char, // ADD THIS
     server_pubkey: *const c_char,
     server_endpoint: *const c_char,
 ) -> c_int {
@@ -66,6 +68,7 @@ pub extern "C" fn vpn_client_connect(
         .to_str()
         .unwrap_or("");
     let client_ip = unsafe { CStr::from_ptr(client_ip) }.to_str().unwrap_or("");
+    let dns_server = unsafe { CStr::from_ptr(dns_server) }.to_str().unwrap_or(""); // ADD THIS
     let server_pubkey = unsafe { CStr::from_ptr(server_pubkey) }
         .to_str()
         .unwrap_or("");
@@ -109,6 +112,15 @@ pub extern "C" fn vpn_client_connect(
     };
 
     client.runtime.block_on(async {
+        // Here, you would implement platform-specific code to:
+        // 1. Set the system DNS to `dns_server`.
+        // 2. Add firewall rules for the kill switch.
+        println!("[VPN_CORE] Received DNS server: {}", dns_server);
+        println!(
+            "[VPN_CORE] Kill switch would allow traffic ONLY to endpoint: {}",
+            server_endpoint
+        );
+
         let new_wgapi = match WGApi::<Userspace>::new(client.ifname.clone()) {
             Ok(api) => api,
             Err(e) => {
@@ -170,6 +182,11 @@ pub extern "C" fn vpn_client_disconnect(client_ptr: *mut VpnClient) -> c_int {
         return -1;
     }
     let client = unsafe { &mut *client_ptr };
+
+    // Here you would implement platform-specific code to:
+    // 1. Revert the system DNS to its original settings.
+    // 2. Remove the kill switch firewall rules.
+    println!("[VPN_CORE] DNS and firewall rules would be reverted upon disconnect.");
 
     if let Some(wgapi) = client.wgapi.take() {
         // Dropping the wgapi object automatically triggers its cleanup.

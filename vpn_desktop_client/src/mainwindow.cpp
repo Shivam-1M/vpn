@@ -102,6 +102,7 @@ void MainWindow::onLoginReplyFinished(QNetworkReply *reply)
     reply->deleteLater();
 }
 
+// UPDATE THIS FUNCTION
 void MainWindow::onConfigReplyFinished(QNetworkReply *reply)
 {
     if (reply->error() == QNetworkReply::NoError)
@@ -113,6 +114,7 @@ void MainWindow::onConfigReplyFinished(QNetworkReply *reply)
         // Populate our config struct
         vpnConfig.clientPrivateKey = jsonObj["client_private_key"].toString();
         vpnConfig.clientIp = jsonObj["client_ip"].toString();
+        vpnConfig.dnsServer = jsonObj["dns_server"].toString(); // ADD THIS
         vpnConfig.serverPublicKey = jsonObj["server_public_key"].toString();
         vpnConfig.serverEndpoint = jsonObj["server_endpoint"].toString();
 
@@ -133,6 +135,7 @@ void MainWindow::onConfigReplyFinished(QNetworkReply *reply)
     reply->deleteLater();
 }
 
+// UPDATE THIS FUNCTION
 void MainWindow::onConnectButtonClicked()
 {
     if (!isConnected)
@@ -141,6 +144,7 @@ void MainWindow::onConnectButtonClicked()
         if (vpn_client_connect(vpnClient,
                                vpnConfig.clientPrivateKey.toStdString().c_str(),
                                vpnConfig.clientIp.toStdString().c_str(),
+                               vpnConfig.dnsServer.toStdString().c_str(), // ADD THIS
                                vpnConfig.serverPublicKey.toStdString().c_str(),
                                vpnConfig.serverEndpoint.toStdString().c_str()) == 0)
         {
