@@ -7,7 +7,7 @@
     <x>0</x>
     <y>0</y>
     <width>450</width>
-    <height>350</height>
+    <height>450</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -49,6 +49,25 @@
         <widget class="QPushButton" name="loginButton">
          <property name="text">
           <string>Login</string>
+         </property>
+        </widget>
+       </item>
+      </layout>
+     </widget>
+    </item>
+    <item>
+     <widget class="QGroupBox" name="deviceGroup">
+      <property name="enabled">
+       <bool>false</bool>
+      </property>
+      <property name="title">
+       <string>Device</string>
+      </property>
+      <layout class="QVBoxLayout" name="verticalLayout_2">
+       <item>
+        <widget class="QPushButton" name="registerDeviceButton">
+         <property name="text">
+          <string>Generate Keys &amp; Register Device</string>
          </property>
         </widget>
        </item>

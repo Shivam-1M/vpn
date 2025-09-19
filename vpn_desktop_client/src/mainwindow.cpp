@@ -25,6 +25,8 @@ MainWindow::MainWindow(QWidget *parent)
     // Connect the buttons' clicked signals to our handler slots.
     connect(ui->connectButton, &QPushButton::clicked, this, &MainWindow::onConnectButtonClicked);
     connect(ui->loginButton, &QPushButton::clicked, this, &MainWindow::onLoginButtonClicked);
+    // ADD THIS
+    connect(ui->registerDeviceButton, &QPushButton::clicked, this, &MainWindow::onRegisterDeviceButtonClicked);
 }
 
 MainWindow::~MainWindow()
@@ -81,18 +83,13 @@ void MainWindow::onLoginReplyFinished(QNetworkReply *reply)
             jwtToken = jsonObj["token"].toString();
             QMessageBox::information(this, "Login Success", "Successfully logged in!");
 
-            // Now get the VPN config
-            QNetworkRequest request(QUrl("http://localhost:8080/config"));
-            QString authHeader = "Bearer " + jwtToken;
-            request.setRawHeader("Authorization", authHeader.toUtf8());
-
-            QNetworkReply *configReply = networkManager->get(request);
-            connect(configReply, &QNetworkReply::finished, this, [=]()
-                    { onConfigReplyFinished(configReply); });
+            // Enable the device registration section
+            ui->loginGroup->setEnabled(false);
+            ui->deviceGroup->setEnabled(true);
         }
         else
         {
-            QMessageBox::critical(this, "Login Failed", "Invalid response from server.");
+            QMessageBox::critical(this, "Login Failed", "Invalid credentials or server error.");
         }
     }
     else
@@ -102,7 +99,58 @@ void MainWindow::onLoginReplyFinished(QNetworkReply *reply)
     reply->deleteLater();
 }
 
-// UPDATE THIS FUNCTION
+// ADD THIS ENTIRE FUNCTION
+void MainWindow::onRegisterDeviceButtonClicked()
+{
+    // 1. Generate a new key pair using the Rust library
+    VpnKeyPair keypair = vpn_generate_keypair();
+    QString publicKey = QString::fromUtf8(keypair.public_key);
+    // Store the private key in our config struct
+    vpnConfig.clientPrivateKey = QString::fromUtf8(keypair.private_key);
+
+    // IMPORTANT: Free the strings that Rust allocated to prevent memory leaks
+    vpn_free_string(keypair.public_key);
+    vpn_free_string(keypair.private_key);
+
+    // 2. Send the public key to the server
+    QJsonObject json;
+    json["public_key"] = publicKey;
+    QJsonDocument doc(json);
+    QByteArray data = doc.toJson();
+
+    QNetworkRequest request(QUrl("http://localhost:8080/devices"));
+    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+    QString authHeader = "Bearer " + jwtToken;
+    request.setRawHeader("Authorization", authHeader.toUtf8());
+
+    QNetworkReply *reply = networkManager->post(request, data);
+    connect(reply, &QNetworkReply::finished, this, [=]()
+            { onDeviceReplyFinished(reply); });
+}
+
+// ADD THIS ENTIRE FUNCTION
+void MainWindow::onDeviceReplyFinished(QNetworkReply *reply)
+{
+    if (reply->error() == QNetworkReply::NoError)
+    {
+        QMessageBox::information(this, "Device Registered", "Device successfully registered! Now fetching config...");
+
+        // 3. Now that the device is registered, get the VPN config
+        QNetworkRequest request(QUrl("http://localhost:8080/config"));
+        QString authHeader = "Bearer " + jwtToken;
+        request.setRawHeader("Authorization", authHeader.toUtf8());
+
+        QNetworkReply *configReply = networkManager->get(request);
+        connect(configReply, &QNetworkReply::finished, this, [=]()
+                { onConfigReplyFinished(configReply); });
+    }
+    else
+    {
+        QMessageBox::critical(this, "Device Registration Failed", "Error: " + reply->errorString());
+    }
+    reply->deleteLater();
+}
+
 void MainWindow::onConfigReplyFinished(QNetworkReply *reply)
 {
     if (reply->error() == QNetworkReply::NoError)
@@ -111,14 +159,13 @@ void MainWindow::onConfigReplyFinished(QNetworkReply *reply)
         QJsonDocument jsonDoc = QJsonDocument::fromJson(response_data);
         QJsonObject jsonObj = jsonDoc.object();
 
-        // Populate our config struct
-        vpnConfig.clientPrivateKey = jsonObj["client_private_key"].toString();
+        // Populate our config struct (we already have the private key)
         vpnConfig.clientIp = jsonObj["client_ip"].toString();
-        vpnConfig.dnsServer = jsonObj["dns_server"].toString(); // ADD THIS
+        vpnConfig.dnsServer = jsonObj["dns_server"].toString();
         vpnConfig.serverPublicKey = jsonObj["server_public_key"].toString();
         vpnConfig.serverEndpoint = jsonObj["server_endpoint"].toString();
 
-        if (vpnConfig.clientPrivateKey.isEmpty() || vpnConfig.serverEndpoint.isEmpty())
+        if (vpnConfig.clientIp.isEmpty() || vpnConfig.serverEndpoint.isEmpty())
         {
             QMessageBox::critical(this, "Config Error", "Failed to parse VPN configuration from server.");
             return;
@@ -126,7 +173,7 @@ void MainWindow::onConfigReplyFinished(QNetworkReply *reply)
 
         QMessageBox::information(this, "Config Received", "VPN configuration loaded successfully.");
         ui->connectButton->setEnabled(true); // Enable the connect button
-        ui->loginGroup->setEnabled(false);   // Disable the login group
+        ui->deviceGroup->setEnabled(false);  // Disable device registration
     }
     else
     {
@@ -135,16 +182,15 @@ void MainWindow::onConfigReplyFinished(QNetworkReply *reply)
     reply->deleteLater();
 }
 
-// UPDATE THIS FUNCTION
 void MainWindow::onConnectButtonClicked()
 {
     if (!isConnected)
     {
-        // Use the config we fetched from the server
+        // Use the config we fetched from the server and our generated key
         if (vpn_client_connect(vpnClient,
                                vpnConfig.clientPrivateKey.toStdString().c_str(),
                                vpnConfig.clientIp.toStdString().c_str(),
-                               vpnConfig.dnsServer.toStdString().c_str(), // ADD THIS
+                               vpnConfig.dnsServer.toStdString().c_str(),
                                vpnConfig.serverPublicKey.toStdString().c_str(),
                                vpnConfig.serverEndpoint.toStdString().c_str()) == 0)
         {

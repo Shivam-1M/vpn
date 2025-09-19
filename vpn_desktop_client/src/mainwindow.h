@@ -29,6 +29,9 @@ private slots:
     // Slot to handle the connect button click.
     void onConnectButtonClicked();
     void onLoginButtonClicked();
+    // ADD THESE
+    void onRegisterDeviceButtonClicked();
+    void onDeviceReplyFinished(QNetworkReply *reply);
     void onLoginReplyFinished(QNetworkReply *reply);
     void onConfigReplyFinished(QNetworkReply *reply);
 
@@ -45,12 +48,11 @@ private:
     QNetworkAccessManager *networkManager;
     QString jwtToken;
 
-    // UPDATE THIS STRUCT
     struct VpnConfig
     {
         QString clientPrivateKey;
         QString clientIp;
-        QString dnsServer; // ADD THIS
+        QString dnsServer;
         QString serverPublicKey;
         QString serverEndpoint;
     } vpnConfig;

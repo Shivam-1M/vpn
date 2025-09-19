@@ -2,8 +2,40 @@ use base64::{engine::general_purpose, Engine as _};
 use defguard_wireguard_rs::{
     host::Peer, key::Key, InterfaceConfiguration, Userspace, WGApi, WireguardInterfaceApi,
 };
-use std::ffi::{c_char, c_int, CStr};
+use rand::rngs::OsRng;
+use std::ffi::{c_char, c_int, CStr, CString};
 use tokio::runtime::Runtime;
+use x25519_dalek::{PublicKey, StaticSecret};
+
+// A struct to hold the generated key pair.
+#[repr(C)]
+pub struct VpnKeyPair {
+    pub public_key: *mut c_char,
+    pub private_key: *mut c_char,
+}
+
+#[no_mangle]
+pub extern "C" fn vpn_generate_keypair() -> VpnKeyPair {
+    // FIX: Use the non-deprecated function `random_from_rng`
+    let secret = StaticSecret::random_from_rng(OsRng);
+    let public = PublicKey::from(&secret);
+
+    VpnKeyPair {
+        public_key: CString::new(general_purpose::STANDARD.encode(public.as_bytes()))
+            .unwrap()
+            .into_raw(),
+        private_key: CString::new(general_purpose::STANDARD.encode(secret.to_bytes()))
+            .unwrap()
+            .into_raw(),
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn vpn_free_string(s: *mut c_char) {
+    if !s.is_null() {
+        let _ = CString::from_raw(s);
+    }
+}
 
 // The VpnClient struct now holds an Option<WGApi>.
 // This allows us to have a state where the WGApi object doesn't exist (i.e., disconnected).
@@ -47,13 +79,12 @@ pub unsafe extern "C" fn vpn_client_destroy(client_ptr: *mut VpnClient) {
     }
 }
 
-// UPDATE THIS FUNCTION SIGNATURE
 #[no_mangle]
 pub extern "C" fn vpn_client_connect(
     client_ptr: *mut VpnClient,
     client_privkey: *const c_char,
     client_ip: *const c_char,
-    dns_server: *const c_char, // ADD THIS
+    dns_server: *const c_char,
     server_pubkey: *const c_char,
     server_endpoint: *const c_char,
 ) -> c_int {
@@ -68,7 +99,7 @@ pub extern "C" fn vpn_client_connect(
         .to_str()
         .unwrap_or("");
     let client_ip = unsafe { CStr::from_ptr(client_ip) }.to_str().unwrap_or("");
-    let dns_server = unsafe { CStr::from_ptr(dns_server) }.to_str().unwrap_or(""); // ADD THIS
+    let dns_server = unsafe { CStr::from_ptr(dns_server) }.to_str().unwrap_or("");
     let server_pubkey = unsafe { CStr::from_ptr(server_pubkey) }
         .to_str()
         .unwrap_or("");
