@@ -7,7 +7,6 @@ use std::ffi::{c_char, c_int, CStr, CString};
 use tokio::runtime::Runtime;
 use x25519_dalek::{PublicKey, StaticSecret};
 
-// A struct to hold the generated key pair.
 #[repr(C)]
 pub struct VpnKeyPair {
     pub public_key: *mut c_char,
@@ -16,7 +15,6 @@ pub struct VpnKeyPair {
 
 #[no_mangle]
 pub extern "C" fn vpn_generate_keypair() -> VpnKeyPair {
-    // FIX: Use the non-deprecated function `random_from_rng`
     let secret = StaticSecret::random_from_rng(OsRng);
     let public = PublicKey::from(&secret);
 
@@ -37,8 +35,6 @@ pub unsafe extern "C" fn vpn_free_string(s: *mut c_char) {
     }
 }
 
-// The VpnClient struct now holds an Option<WGApi>.
-// This allows us to have a state where the WGApi object doesn't exist (i.e., disconnected).
 pub struct VpnClient {
     runtime: Runtime,
     ifname: String,
@@ -47,7 +43,6 @@ pub struct VpnClient {
 
 #[no_mangle]
 pub extern "C" fn vpn_client_create() -> *mut VpnClient {
-    // **FIX:** Use a unique name for the client interface to avoid conflicts with the server.
     let ifname = if cfg!(target_os = "linux") || cfg!(target_os = "freebsd") {
         "wg_client".into()
     } else {
@@ -59,7 +54,7 @@ pub extern "C" fn vpn_client_create() -> *mut VpnClient {
             let client = VpnClient {
                 runtime,
                 ifname,
-                wgapi: None, // Start in a disconnected state
+                wgapi: None,
             };
             Box::into_raw(Box::new(client))
         }
@@ -73,8 +68,6 @@ pub extern "C" fn vpn_client_create() -> *mut VpnClient {
 #[no_mangle]
 pub unsafe extern "C" fn vpn_client_destroy(client_ptr: *mut VpnClient) {
     if !client_ptr.is_null() {
-        // Taking ownership back from the raw pointer to allow Rust to drop it.
-        // This will trigger the Drop implementation on WGApi if it still exists.
         let _ = Box::from_raw(client_ptr);
     }
 }
@@ -94,7 +87,6 @@ pub extern "C" fn vpn_client_connect(
     }
     let client = unsafe { &mut *client_ptr };
 
-    // --- Convert C strings to Rust strings ---
     let client_privkey = unsafe { CStr::from_ptr(client_privkey) }
         .to_str()
         .unwrap_or("");
@@ -116,9 +108,10 @@ pub extern "C" fn vpn_client_connect(
         return -1;
     }
 
-    // Proactively clean up any old interface before connecting.
+    // FIX #1: Remove the second argument from WGApi::new()
     if let Ok(cleanup_api) = WGApi::<Userspace>::new(client.ifname.clone()) {
         let _ = cleanup_api.remove_interface();
+        println!("[VPN_CORE] Cleaned up any stale VPN interface.");
     }
 
     let client_address = match client_ip.parse() {
@@ -143,15 +136,13 @@ pub extern "C" fn vpn_client_connect(
     };
 
     client.runtime.block_on(async {
-        // Here, you would implement platform-specific code to:
-        // 1. Set the system DNS to `dns_server`.
-        // 2. Add firewall rules for the kill switch.
         println!("[VPN_CORE] Received DNS server: {}", dns_server);
         println!(
             "[VPN_CORE] Kill switch would allow traffic ONLY to endpoint: {}",
             server_endpoint
         );
 
+        // FIX #2: Remove the second argument from WGApi::new()
         let new_wgapi = match WGApi::<Userspace>::new(client.ifname.clone()) {
             Ok(api) => api,
             Err(e) => {
@@ -162,15 +153,8 @@ pub extern "C" fn vpn_client_connect(
 
         let server_pubkey_bytes: [u8; 32] = match general_purpose::STANDARD.decode(server_pubkey) {
             Ok(bytes) if bytes.len() == 32 => bytes.try_into().unwrap(),
-            Ok(bytes) => {
-                eprintln!(
-                    "[VPN_CORE] Decoded server public key has invalid length: {}",
-                    bytes.len()
-                );
-                return -5;
-            }
-            Err(e) => {
-                eprintln!("[VPN_CORE] Failed to decode server public key: {:?}", e);
+            _ => {
+                eprintln!("[VPN_CORE] Failed to decode or invalid length server public key");
                 return -5;
             }
         };
@@ -184,6 +168,7 @@ pub extern "C" fn vpn_client_connect(
             name: client.ifname.clone(),
             prvkey: client_privkey.to_string(),
             addresses: vec![client_address],
+            // FIX #3: Change Some(0) to just 0
             port: 0,
             peers: vec![peer],
             mtu: None,
@@ -214,15 +199,11 @@ pub extern "C" fn vpn_client_disconnect(client_ptr: *mut VpnClient) -> c_int {
     }
     let client = unsafe { &mut *client_ptr };
 
-    // Here you would implement platform-specific code to:
-    // 1. Revert the system DNS to its original settings.
-    // 2. Remove the kill switch firewall rules.
     println!("[VPN_CORE] DNS and firewall rules would be reverted upon disconnect.");
 
     if let Some(wgapi) = client.wgapi.take() {
-        // Dropping the wgapi object automatically triggers its cleanup.
         drop(wgapi);
     }
 
-    0 // Success
+    0
 }

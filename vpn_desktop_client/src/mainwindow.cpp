@@ -49,7 +49,6 @@ bool MainWindow::manageKillSwitch(bool enable)
     if (enable)
     {
         // --- Enable Kill Switch ---
-        // Get server IP from the endpoint string
         QUrl endpointUrl("udp://" + vpnConfig.serverEndpoint);
         QString serverIp = endpointUrl.host();
         if (serverIp.isEmpty())
@@ -57,30 +56,26 @@ bool MainWindow::manageKillSwitch(bool enable)
             QMessageBox::critical(this, "Kill Switch Error", "Could not parse server IP from endpoint.");
             return false;
         }
-
         qInfo() << "Enabling Kill Switch for server IP:" << serverIp;
 
-        // Note: These commands need root privileges to run.
-        QStringList args_enable;
-        args_enable << "-F";                                                                                                // Flush existing rules
-        args_enable << "-P" << "OUTPUT" << "DROP";                                                                          // 1. Block all outgoing traffic by default
-        args_enable << "-A" << "OUTPUT" << "-m" << "conntrack" << "--ctstate" << "ESTABLISHED,RELATED" << "-j" << "ACCEPT"; // Allow established connections
-        args_enable << "-A" << "OUTPUT" << "-o" << "lo" << "-j" << "ACCEPT";                                                // 2. Allow loopback traffic
-        args_enable << "-A" << "OUTPUT" << "-o" << "wg_client" << "-j" << "ACCEPT";                                         // 3. Allow traffic on our VPN interface
-        args_enable << "-A" << "OUTPUT" << "-d" << serverIp << "-p" << "udp" << "--dport" << "51820" << "-j" << "ACCEPT";   // 4. Allow traffic to the VPN server
+        // FIX: Run each command separately
+        QProcess::execute(program, {"-F"});                   // 1. Flush all existing rules
+        QProcess::execute(program, {"-P", "OUTPUT", "DROP"}); // 2. Set default policy to DROP
+        QProcess::execute(program, {"-A", "OUTPUT", "-m", "conntrack", "--ctstate", "ESTABLISHED,RELATED", "-j", "ACCEPT"});
+        QProcess::execute(program, {"-A", "OUTPUT", "-o", "lo", "-j", "ACCEPT"});
+        QProcess::execute(program, {"-A", "OUTPUT", "-o", "wg_client", "-j", "ACCEPT"});
+        QProcess::execute(program, {"-A", "OUTPUT", "-d", serverIp, "-p", "udp", "--dport", "51820", "-j", "ACCEPT"});
 
-        QProcess::execute(program, args_enable);
         QMessageBox::information(this, "Kill Switch", "Kill Switch Enabled.");
     }
     else
     {
         // --- Disable Kill Switch ---
         qInfo() << "Disabling Kill Switch.";
-        QStringList args_disable;
-        args_disable << "-F";                         // Flush all rules
-        args_disable << "-P" << "OUTPUT" << "ACCEPT"; // 5. Set default policy back to allowing all traffic
+        // FIX: Run each command separately
+        QProcess::execute(program, {"-F"});                     // 1. Flush all rules
+        QProcess::execute(program, {"-P", "OUTPUT", "ACCEPT"}); // 2. Set default policy back to ACCEPT
 
-        QProcess::execute(program, args_disable);
         QMessageBox::information(this, "Kill Switch", "Kill Switch Disabled.");
     }
     return true;
