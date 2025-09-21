@@ -3,6 +3,7 @@
 
 #include <QMessageBox>
 #include <QUrl>
+#include <QThread>
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent), ui(new Ui::MainWindow), vpnClient(nullptr), isConnected(false)
@@ -31,7 +32,7 @@ MainWindow::~MainWindow()
     {
         manageKillSwitch(false);
     }
-    // ... (Rest of destructor remains the same)
+
     if (vpnClient)
     {
         if (isConnected)
@@ -48,7 +49,6 @@ bool MainWindow::manageKillSwitch(bool enable)
     QString program = "iptables";
     if (enable)
     {
-        // --- Enable Kill Switch ---
         QUrl endpointUrl("udp://" + vpnConfig.serverEndpoint);
         QString serverIp = endpointUrl.host();
         if (serverIp.isEmpty())
@@ -58,13 +58,29 @@ bool MainWindow::manageKillSwitch(bool enable)
         }
         qInfo() << "Enabling Kill Switch for server IP:" << serverIp;
 
-        // FIX: Run each command separately
-        QProcess::execute(program, {"-F"});                   // 1. Flush all existing rules
-        QProcess::execute(program, {"-P", "OUTPUT", "DROP"}); // 2. Set default policy to DROP
+        // --- Enable Kill Switch ---
+        QProcess::execute(program, {"-F"});
+        QProcess::execute(program, {"-P", "INPUT", "ACCEPT"}); // Keep INPUT open
+        QProcess::execute(program, {"-P", "FORWARD", "DROP"}); // Block forwarding
+        QProcess::execute(program, {"-P", "OUTPUT", "DROP"});  // Block all outgoing by default
+
+        // Allow essential traffic
         QProcess::execute(program, {"-A", "OUTPUT", "-m", "conntrack", "--ctstate", "ESTABLISHED,RELATED", "-j", "ACCEPT"});
         QProcess::execute(program, {"-A", "OUTPUT", "-o", "lo", "-j", "ACCEPT"});
-        QProcess::execute(program, {"-A", "OUTPUT", "-o", "wg_client", "-j", "ACCEPT"});
+
+        // Allow traffic to the VPN server
         QProcess::execute(program, {"-A", "OUTPUT", "-d", serverIp, "-p", "udp", "--dport", "51820", "-j", "ACCEPT"});
+
+        // **FIX**: Explicitly allow DNS traffic to our chosen DNS server
+        if (!vpnConfig.dnsServer.isEmpty())
+        {
+            qInfo() << "Allowing DNS traffic to" << vpnConfig.dnsServer;
+            QProcess::execute(program, {"-A", "OUTPUT", "-d", vpnConfig.dnsServer, "-p", "udp", "--dport", "53", "-j", "ACCEPT"});
+            QProcess::execute(program, {"-A", "OUTPUT", "-d", vpnConfig.dnsServer, "-p", "tcp", "--dport", "53", "-j", "ACCEPT"});
+        }
+
+        // Allow all traffic going through the VPN tunnel itself
+        QProcess::execute(program, {"-A", "OUTPUT", "-o", "wg_client", "-j", "ACCEPT"});
 
         QMessageBox::information(this, "Kill Switch", "Kill Switch Enabled.");
     }
@@ -72,10 +88,10 @@ bool MainWindow::manageKillSwitch(bool enable)
     {
         // --- Disable Kill Switch ---
         qInfo() << "Disabling Kill Switch.";
-        // FIX: Run each command separately
-        QProcess::execute(program, {"-F"});                     // 1. Flush all rules
-        QProcess::execute(program, {"-P", "OUTPUT", "ACCEPT"}); // 2. Set default policy back to ACCEPT
-
+        QProcess::execute(program, {"-F"});
+        QProcess::execute(program, {"-P", "INPUT", "ACCEPT"});
+        QProcess::execute(program, {"-P", "FORWARD", "ACCEPT"});
+        QProcess::execute(program, {"-P", "OUTPUT", "ACCEPT"});
         QMessageBox::information(this, "Kill Switch", "Kill Switch Disabled.");
     }
     return true;
@@ -257,13 +273,14 @@ void MainWindow::onConnectButtonClicked()
 {
     if (!isConnected)
     {
-        // 1. Enable the kill switch BEFORE connecting
         if (!manageKillSwitch(true))
         {
-            return; // Don't proceed if kill switch fails
+            return;
         }
 
-        // 2. Attempt to connect
+        // **FIX**: Add a small delay to prevent the race condition
+        QThread::msleep(200); // Wait 200 milliseconds
+
         if (vpn_client_connect(vpnClient,
                                vpnConfig.clientPrivateKey.toStdString().c_str(),
                                vpnConfig.clientIp.toStdString().c_str(),
@@ -278,26 +295,21 @@ void MainWindow::onConnectButtonClicked()
         else
         {
             QMessageBox::warning(this, "Connection Failed", "Could not connect to the VPN server.");
-            // 3. IMPORTANT: Disable kill switch if connection fails
             manageKillSwitch(false);
         }
     }
     else
     {
-        // 1. Disconnect from the VPN
         if (vpn_client_disconnect(vpnClient) == 0)
         {
             ui->statusLabel->setText("Status: Disconnected");
             ui->connectButton->setText("Connect");
             isConnected = false;
-
-            // 2. Disable the kill switch AFTER disconnecting
             manageKillSwitch(false);
         }
         else
         {
             QMessageBox::warning(this, "Disconnection Failed", "Could not disconnect from the VPN server.");
-            // Don't disable kill switch here, as we might still be connected.
         }
     }
 }
