@@ -6,6 +6,7 @@
 #include <QNetworkReply>
 #include <QJsonObject>
 #include <QJsonDocument>
+#include <QSettings> // ADD THIS
 
 #include "vpn_client_core.h" // Include our Rust library header
 
@@ -26,27 +27,25 @@ public:
     ~MainWindow();
 
 private slots:
-    // Slot to handle the connect button click.
     void onConnectButtonClicked();
     void onLoginButtonClicked();
-    // ADD THESE
     void onRegisterDeviceButtonClicked();
     void onDeviceReplyFinished(QNetworkReply *reply);
     void onLoginReplyFinished(QNetworkReply *reply);
     void onConfigReplyFinished(QNetworkReply *reply);
 
 private:
-    // Pointer to the UI elements.
+    // ADD THIS FUNCTION
+    void loadOrGenerateKeys();
+
     Ui::MainWindow *ui;
-
-    // Pointer to our Rust VPN client instance.
     VpnClient *vpnClient;
-
-    // State variable to track connection status.
     bool isConnected;
-
     QNetworkAccessManager *networkManager;
     QString jwtToken;
+
+    // ADD THIS
+    QString clientPublicKey;
 
     struct VpnConfig
     {
