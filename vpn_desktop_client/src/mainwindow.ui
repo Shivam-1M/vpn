@@ -106,6 +106,25 @@
       </property>
      </widget>
     </item>
+    <item>
+     <widget class="QGroupBox" name="sessionGroup">
+      <property name="enabled">
+       <bool>false</bool>
+      </property>
+      <property name="title">
+       <string>Session</string>
+      </property>
+      <layout class="QVBoxLayout" name="verticalLayout_3">
+       <item>
+        <widget class="QPushButton" name="logoutButton">
+         <property name="text">
+          <string>Log Out &amp; Remove This Device</string>
+         </property>
+        </widget>
+       </item>
+      </layout>
+     </widget>
+    </item>
    </layout>
   </widget>
   <widget class="QMenuBar" name="menubar">

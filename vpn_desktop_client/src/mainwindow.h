@@ -33,11 +33,14 @@ private slots:
     void onDeviceReplyFinished(QNetworkReply *reply);
     void onLoginReplyFinished(QNetworkReply *reply);
     void onConfigReplyFinished(QNetworkReply *reply);
+    void onLogoutButtonClicked();
+    void onLogoutReplyFinished(QNetworkReply *reply);
 
 private:
     void loadOrGenerateKeys();
     // ADD THIS FUNCTION
     bool manageKillSwitch(bool enable);
+    void resetToLoginState();
 
     Ui::MainWindow *ui;
     VpnClient *vpnClient;

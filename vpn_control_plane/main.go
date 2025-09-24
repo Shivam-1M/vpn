@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -45,17 +46,27 @@ func (i *Ipam) GetNextIP() (string, error) {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 
+	start := i.nextHostID
 	for {
-		if i.nextHostID > i.maxHostID {
-			return "", fmt.Errorf("no more available IPs in the pool")
-		}
+		// Create IP with current host ID
 		ip := fmt.Sprintf("10.10.10.%d/32", i.nextHostID)
+
+		// If the IP is not already assigned, use it
 		if !i.assignedIPs[ip] {
 			i.assignedIPs[ip] = true
 			i.nextHostID++
 			return ip, nil
 		}
+
+		// Otherwise, increment and try the next one
 		i.nextHostID++
+		if i.nextHostID > i.maxHostID {
+			i.nextHostID = 2 // Wrap around if we reach the end
+		}
+		if i.nextHostID == start {
+			// If we've wrapped all the way around, the pool is full
+			return "", fmt.Errorf("no more available IPs in the pool")
+		}
 	}
 }
 
@@ -73,6 +84,7 @@ type User struct {
 type Device struct {
 	gorm.Model
 	PublicKey string `gorm:"uniqueIndex;not null"`
+	IPAddress string `gorm:"uniqueIndex;not null"`
 	UserID    uint
 }
 
@@ -124,6 +136,29 @@ func main() {
 	db.AutoMigrate(&User{}, &Device{})
 	log.Println("Database schema migrated successfully.")
 
+	var existingDevices []Device
+	if err := db.Find(&existingDevices).Error; err == nil {
+		highestHostID := 0
+		for _, device := range existingDevices {
+			// Mark the IP as assigned in our map
+			ipam.assignedIPs[device.IPAddress] = true
+
+			// Also, find the highest assigned IP to avoid collisions
+			parts := strings.Split(strings.TrimSuffix(device.IPAddress, "/32"), ".")
+			if len(parts) == 4 {
+				hostID, _ := strconv.Atoi(parts[3])
+				if hostID > highestHostID {
+					highestHostID = hostID
+				}
+			}
+		}
+		// Set the next IP to be one higher than the highest found in the DB
+		if highestHostID > 0 {
+			ipam.nextHostID = highestHostID + 1
+		}
+		log.Printf("IPAM initialized. Found %d existing IPs. Next IP will start from host ID %d.", len(ipam.assignedIPs), ipam.nextHostID)
+	}
+
 	// --- gRPC Client Connection ---
 	// Connect to the Rust Data Plane's gRPC server.
 	// NOTE: This will fail until the Rust server is running its gRPC service.
@@ -143,6 +178,7 @@ func main() {
 	// We wrap the addDeviceHandler with our JWT middleware to protect it.
 	http.Handle("/devices", jwtMiddleware(http.HandlerFunc(addDeviceHandler)))
 	http.Handle("/config", jwtMiddleware(http.HandlerFunc(getConfigHandler)))
+	http.Handle("/devices/remove", jwtMiddleware(http.HandlerFunc(removeDeviceHandler)))
 
 	log.Println("Starting VPN Control Plane server on http://localhost:8080")
 	if err := http.ListenAndServe(":8080", nil); err != nil {
@@ -219,7 +255,6 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func addDeviceHandler(w http.ResponseWriter, r *http.Request) {
-	// The user's email is added to the request context by the middleware.
 	email := r.Context().Value(contextKey("userEmail")).(string)
 
 	var devReq DeviceRequest
@@ -228,66 +263,134 @@ func addDeviceHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Find the user in the database
 	var user User
 	if err := db.Where("email = ?", email).First(&user).Error; err != nil {
 		http.Error(w, "User not found", http.StatusNotFound)
 		return
 	}
 
-	// Save the new device to the database
-	device := Device{PublicKey: devReq.PublicKey, UserID: user.ID}
-	if err := db.Create(&device).Error; err != nil {
-		http.Error(w, "Public key may already exist", http.StatusConflict)
-		return
-	}
-
-	// --- Make the gRPC call to the Rust Data Plane ---
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-
-	res, err := vpnClient.AddPeer(ctx, &pb.PeerRequest{PublicKey: devReq.PublicKey})
-	if err != nil {
-		log.Printf("gRPC call to AddPeer failed: %v", err)
-		// Note: In a real app, we might want to roll back the database change here.
-		http.Error(w, "Could not configure peer on data plane", http.StatusInternalServerError)
-		return
-	}
-
-	log.Printf("gRPC AddPeer response: %v", res.Message)
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(map[string]string{
-		"message": "Device added successfully",
-		"status":  res.Message,
-	})
-	log.Printf("Added new device for user %s with public key %s", email, devReq.PublicKey)
-}
-
-// UPDATE THIS FUNCTION
-func getConfigHandler(w http.ResponseWriter, r *http.Request) {
-	// The user's email is added to the request context by the middleware.
-	email := r.Context().Value(contextKey("userEmail")).(string)
-	log.Printf("Config requested for user: %s", email)
-
-	// Get the next available IP from our IPAM
-	clientIP, err := ipam.GetNextIP()
+	// 1. Get a new IP from the IPAM for the new device
+	assignedIP, err := ipam.GetNextIP()
 	if err != nil {
 		log.Printf("IPAM error: %v", err)
 		http.Error(w, "Could not assign IP address", http.StatusInternalServerError)
 		return
 	}
-	log.Printf("Assigned IP %s to user %s", clientIP, email)
 
-	// In a real application, you would also generate a unique private key
-	// for the client here. For now, we'll keep the placeholder.
+	// 2. Save the new device with its IP to the database
+	device := Device{PublicKey: devReq.PublicKey, IPAddress: assignedIP, UserID: user.ID}
+	if err := db.Create(&device).Error; err != nil {
+		http.Error(w, "Public key or IP may already exist", http.StatusConflict)
+		// Note: You would want to release the IP back to the pool here in a real app
+		return
+	}
+
+	// 3. Make the gRPC call to the Rust Data Plane with the new IP
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	// The gRPC struct `pb.PeerRequest` is now updated from the regenerated code
+	res, err := vpnClient.AddPeer(ctx, &pb.PeerRequest{
+		PublicKey: devReq.PublicKey,
+		IpAddress: assignedIP, // Send the assigned IP
+	})
+	if err != nil {
+		log.Printf("gRPC call to AddPeer failed: %v", err)
+		// Note: Roll back the database change here in a real app.
+		http.Error(w, "Could not configure peer on data plane", http.StatusInternalServerError)
+		return
+	}
+	log.Printf("gRPC AddPeer response: %v", res.Message)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(map[string]string{
+		"message": "Device added successfully with IP " + assignedIP,
+		"status":  res.Message,
+	})
+	log.Printf("Added new device for user %s with public key %s and IP %s", email, devReq.PublicKey, assignedIP)
+}
+
+func removeDeviceHandler(w http.ResponseWriter, r *http.Request) {
+	// Ensure this is a DELETE request
+	if r.Method != http.MethodDelete {
+		http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
+		return
+	}
+
+	email := r.Context().Value(contextKey("userEmail")).(string)
+
+	var devReq DeviceRequest
+	if err := json.NewDecoder(r.Body).Decode(&devReq); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// 1. Find the user in the database
+	var user User
+	if err := db.Where("email = ?", email).First(&user).Error; err != nil {
+		http.Error(w, "User not found", http.StatusNotFound)
+		return
+	}
+
+	// 2. Find the specific device to be deleted
+	var device Device
+	if err := db.Where("public_key = ? AND user_id = ?", devReq.PublicKey, user.ID).First(&device).Error; err != nil {
+		http.Error(w, "Device not found for this user", http.StatusNotFound)
+		return
+	}
+
+	// 3. Make the gRPC call to the Rust Data Plane to remove the peer
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	_, err := vpnClient.RemovePeer(ctx, &pb.PeerRequest{PublicKey: devReq.PublicKey})
+	if err != nil {
+		// Log the gRPC error, but don't stop. We still want to remove the device
+		// from our database. The data plane might be temporarily down.
+		log.Printf("gRPC call to RemovePeer failed: %v. Continuing with DB removal.", err)
+	}
+
+	// 4. Delete the device from the database
+	if err := db.Delete(&device).Error; err != nil {
+		http.Error(w, "Failed to remove device from database", http.StatusInternalServerError)
+		return
+	}
+
+	log.Printf("Removed device for user %s with public key %s", email, devReq.PublicKey)
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{
+		"message": "Device removed successfully",
+	})
+}
+
+// UPDATE THIS FUNCTION
+func getConfigHandler(w http.ResponseWriter, r *http.Request) {
+	email := r.Context().Value(contextKey("userEmail")).(string)
+	log.Printf("Config requested for user: %s", email)
+
+	// 1. Find the user
+	var user User
+	if err := db.Where("email = ?", email).Preload("Devices").First(&user).Error; err != nil {
+		http.Error(w, "User not found", http.StatusNotFound)
+		return
+	}
+
+	// 2. Find their most recently created device
+	if len(user.Devices) == 0 {
+		http.Error(w, "No registered devices found for this user", http.StatusNotFound)
+		return
+	}
+	// For simplicity, we get the last device. A real app might let the user choose.
+	latestDevice := user.Devices[len(user.Devices)-1]
+
+	// 3. Return the config using the IP from the database
 	config := VpnConfigResponse{
-		ClientPrivateKey: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=", // Placeholder
-		ClientIp:         clientIP,
-		DnsServer:        "1.1.1.1",                                      // A good, private DNS resolver. Can also be your own.
-		ServerPublicKey:  "j0DFrbaPJWJK5bIU6nZ6bslNgp09e14a0bpvPiE4KF8=", // The public key from your Rust server
-		ServerEndpoint:   "127.0.0.1:51820",                              // Your server's public IP
+		ClientPrivateKey: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=", // This should be retrieved from client
+		ClientIp:         latestDevice.IPAddress,
+		DnsServer:        "1.1.1.1",
+		ServerPublicKey:  "QCV8txg1lYKirYZkEwWPTHnnwaCJcR8ki+Yy9Qc6IFk=", // Make sure this is up to date
+		ServerEndpoint:   "127.0.0.1:51820",
 	}
 
 	w.Header().Set("Content-Type", "application/json")

@@ -23,6 +23,8 @@ extern "C"
     // its internal layout, only that it's a pointer.
     typedef struct VpnClient VpnClient;
 
+    char* vpn_get_public_key(const char* private_key);
+
     // Declare the functions from the Rust library.
     // ADD THESE TWO FUNCTIONS
     VpnKeyPair vpn_generate_keypair();

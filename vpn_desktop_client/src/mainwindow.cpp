@@ -4,6 +4,7 @@
 #include <QMessageBox>
 #include <QUrl>
 #include <QThread>
+#include <QCoreApplication>
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent), ui(new Ui::MainWindow), vpnClient(nullptr), isConnected(false)
@@ -23,6 +24,7 @@ MainWindow::MainWindow(QWidget *parent)
     connect(ui->connectButton, &QPushButton::clicked, this, &MainWindow::onConnectButtonClicked);
     connect(ui->loginButton, &QPushButton::clicked, this, &MainWindow::onLoginButtonClicked);
     connect(ui->registerDeviceButton, &QPushButton::clicked, this, &MainWindow::onRegisterDeviceButtonClicked);
+    connect(ui->logoutButton, &QPushButton::clicked, this, &MainWindow::onLogoutButtonClicked);
 }
 
 MainWindow::~MainWindow()
@@ -105,18 +107,24 @@ void MainWindow::loadOrGenerateKeys()
 
     if (savedPrivateKey.isEmpty())
     {
-        // No key saved, so the user needs to register this device.
         QMessageBox::information(this, "New Device", "No keys found. Please register this device.");
         ui->deviceGroup->setEnabled(true);
     }
     else
     {
-        // Key found, load it and prepare to fetch config.
         QMessageBox::information(this, "Device Found", "Loading existing keys for this device.");
         vpnConfig.clientPrivateKey = savedPrivateKey;
-        ui->deviceGroup->setEnabled(false); // No need to register again
 
-        // Directly fetch the VPN config since we have keys and are logged in.
+        // **FIX**: Derive the public key from the loaded private key.
+        char *pubKeyCStr = vpn_get_public_key(savedPrivateKey.toStdString().c_str());
+        if (pubKeyCStr)
+        {
+            clientPublicKey = QString::fromUtf8(pubKeyCStr);
+            vpn_free_string(pubKeyCStr); // Free the memory allocated by Rust
+        }
+
+        ui->deviceGroup->setEnabled(false);
+
         QNetworkRequest request(QUrl("http://localhost:8080/config"));
         QString authHeader = "Bearer " + jwtToken;
         request.setRawHeader("Authorization", authHeader.toUtf8());
@@ -213,13 +221,21 @@ void MainWindow::onDeviceReplyFinished(QNetworkReply *reply)
 {
     if (reply->error() == QNetworkReply::NoError)
     {
-        QMessageBox::information(this, "Device Registered", "Device successfully registered! Now fetching config...");
+        QMessageBox::information(this, "Device Registered", "Device successfully registered!");
 
-        // UPDATE: Save the private key upon successful registration
         QSettings settings("MyVpn", "VpnClient");
         settings.setValue("clientPrivateKey", vpnConfig.clientPrivateKey);
 
-        // 3. Now get the VPN config
+        // **FIX**: Show a status message and use a more reliable delay
+        ui->statusLabel->setText("Status: Finalizing setup...");
+        // Process UI events to make sure the label updates
+        QCoreApplication::processEvents();
+
+        // Wait 1 second (1000 milliseconds). This is a more robust delay
+        // to ensure the server's network interface is fully ready.
+        QThread::msleep(1000);
+
+        // Now that we've waited, fetch the config
         QNetworkRequest request(QUrl("http://localhost:8080/config"));
         QString authHeader = "Bearer " + jwtToken;
         request.setRawHeader("Authorization", authHeader.toUtf8());
@@ -261,12 +277,79 @@ void MainWindow::onConfigReplyFinished(QNetworkReply *reply)
         // Make sure both login and device groups are disabled now
         ui->loginGroup->setEnabled(false);
         ui->deviceGroup->setEnabled(false);
+        ui->sessionGroup->setEnabled(true);
     }
     else
     {
         QMessageBox::critical(this, "Config Error", "Could not fetch VPN config: " + reply->errorString());
     }
     reply->deleteLater();
+}
+
+void MainWindow::onLogoutButtonClicked()
+{
+    // 1. If currently connected, disconnect first for a clean exit.
+    if (isConnected)
+    {
+        onConnectButtonClicked();
+    }
+
+    // 2. Prepare the DELETE request to the server
+    QJsonObject json;
+    json["public_key"] = clientPublicKey;
+    QJsonDocument doc(json);
+    QByteArray data = doc.toJson();
+
+    QNetworkRequest request(QUrl("http://localhost:8080/devices/remove"));
+    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+    QString authHeader = "Bearer " + jwtToken;
+    request.setRawHeader("Authorization", authHeader.toUtf8());
+
+    // QNetworkAccessManager doesn't have a direct "delete" method,
+    // but you can send a custom request.
+    QNetworkReply *reply = networkManager->sendCustomRequest(request, "DELETE", data);
+    connect(reply, &QNetworkReply::finished, this, [=]()
+            { onLogoutReplyFinished(reply); });
+}
+
+void MainWindow::onLogoutReplyFinished(QNetworkReply *reply)
+{
+    if (reply->error() == QNetworkReply::NoError)
+    {
+        QMessageBox::information(this, "Logged Out", "Device successfully removed from your account.");
+    }
+    else
+    {
+        // We still log out locally even if the server request fails.
+        QMessageBox::warning(this, "Logout Warning", "Could not remove device from server (maybe it's offline?), but logging out locally.");
+    }
+    reply->deleteLater();
+
+    // 3. Reset the application to its initial state
+    resetToLoginState();
+}
+
+void MainWindow::resetToLoginState()
+{
+    // Clear local settings
+    QSettings settings("MyVpn", "VpnClient");
+    settings.clear();
+
+    // Reset UI elements
+    ui->loginGroup->setEnabled(true);
+    ui->deviceGroup->setEnabled(false);
+    ui->sessionGroup->setEnabled(false);
+    ui->connectButton->setEnabled(false);
+    ui->connectButton->setText("Connect");
+    ui->statusLabel->setText("Status: Disconnected");
+    ui->emailLineEdit->clear();
+    ui->passwordLineEdit->clear();
+
+    // Reset internal state
+    isConnected = false;
+    jwtToken.clear();
+    clientPublicKey.clear();
+    vpnConfig = {}; // Clear the config struct
 }
 
 void MainWindow::onConnectButtonClicked()
@@ -302,6 +385,13 @@ void MainWindow::onConnectButtonClicked()
     {
         if (vpn_client_disconnect(vpnClient) == 0)
         {
+
+            ui->statusLabel->setText("Status: Disconnecting...");
+            QCoreApplication::processEvents(); // Update the UI to show the message
+
+            // **FIX**: Add a short delay to allow the OS to clean up the interface
+            QThread::msleep(500); // Wait half a second
+
             ui->statusLabel->setText("Status: Disconnected");
             ui->connectButton->setText("Connect");
             isConnected = false;

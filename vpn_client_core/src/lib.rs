@@ -14,6 +14,34 @@ pub struct VpnKeyPair {
 }
 
 #[no_mangle]
+pub extern "C" fn vpn_get_public_key(private_key_b64: *const c_char) -> *mut c_char {
+    if private_key_b64.is_null() {
+        return std::ptr::null_mut();
+    }
+    let private_key_str = unsafe { CStr::from_ptr(private_key_b64) }
+        .to_str()
+        .unwrap_or("");
+
+    // FIX: Be explicit about the type conversion
+    let private_key_bytes: [u8; 32] = match general_purpose::STANDARD.decode(private_key_str) {
+        Ok(bytes) if bytes.len() == 32 => {
+            // This is the clear, unambiguous way to convert a Vec<u8> to [u8; 32]
+            let mut arr = [0u8; 32];
+            arr.copy_from_slice(&bytes);
+            arr
+        }
+        _ => return std::ptr::null_mut(),
+    };
+
+    let secret = StaticSecret::from(private_key_bytes);
+    let public = PublicKey::from(&secret);
+
+    CString::new(general_purpose::STANDARD.encode(public.as_bytes()))
+        .unwrap()
+        .into_raw()
+}
+
+#[no_mangle]
 pub extern "C" fn vpn_generate_keypair() -> VpnKeyPair {
     let secret = StaticSecret::random_from_rng(OsRng);
     let public = PublicKey::from(&secret);
