@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -113,9 +114,8 @@ type VpnConfigResponse struct {
 var db *gorm.DB
 var vpnClient pb.VpnManagerClient // gRPC client
 var ipam *Ipam
-
-// IMPORTANT: In a real production app, use a secure, randomly generated key from a config file or env var.
-var jwtKey = []byte("my_secret_key")
+var jwtKey []byte
+var serverPublicKey string
 
 // --- Main Application ---
 
@@ -123,6 +123,19 @@ func main() {
 	// Initialize IPAM
 	// We'll reserve IPs from 10.10.10.2 to 10.10.10.254
 	ipam = NewIpam("10.10.10.0/24", 2, 254)
+
+	// Load JWT secret key from environment variable
+	jwtSecret := os.Getenv("JWT_SECRET_KEY")
+	if jwtSecret == "" {
+		log.Fatal("FATAL: JWT_SECRET_KEY environment variable not set.")
+	}
+	jwtKey = []byte(jwtSecret)
+
+	// Load Server Public Key from environment variable
+	serverPublicKey = os.Getenv("WG_PUBLIC_KEY")
+	if serverPublicKey == "" {
+		log.Fatal("FATAL: WG_PUBLIC_KEY environment variable not set.")
+	}
 
 	// --- Database Connection ---
 	var err error
@@ -364,7 +377,6 @@ func removeDeviceHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// UPDATE THIS FUNCTION
 func getConfigHandler(w http.ResponseWriter, r *http.Request) {
 	email := r.Context().Value(contextKey("userEmail")).(string)
 	log.Printf("Config requested for user: %s", email)
@@ -386,11 +398,10 @@ func getConfigHandler(w http.ResponseWriter, r *http.Request) {
 
 	// 3. Return the config using the IP from the database
 	config := VpnConfigResponse{
-		ClientPrivateKey: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=", // This should be retrieved from client
-		ClientIp:         latestDevice.IPAddress,
-		DnsServer:        "1.1.1.1",
-		ServerPublicKey:  "QCV8txg1lYKirYZkEwWPTHnnwaCJcR8ki+Yy9Qc6IFk=", // Make sure this is up to date
-		ServerEndpoint:   "127.0.0.1:51820",
+		ClientIp:        latestDevice.IPAddress,
+		DnsServer:       "1.1.1.1",
+		ServerPublicKey: serverPublicKey,
+		ServerEndpoint:  "127.0.0.1:51820",
 	}
 
 	w.Header().Set("Content-Type", "application/json")
