@@ -5,6 +5,7 @@
 #include <QUrl>
 #include <QThread>
 #include <QCoreApplication>
+#include <QHostAddress>
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent), ui(new Ui::MainWindow), vpnClient(nullptr), isConnected(false)
@@ -51,34 +52,46 @@ bool MainWindow::manageKillSwitch(bool enable)
     QString program = "iptables";
     if (enable)
     {
+        // --- Input Validation ---
         QUrl endpointUrl("udp://" + vpnConfig.serverEndpoint);
-        QString serverIp = endpointUrl.host();
-        if (serverIp.isEmpty())
+        QString serverIpStr = endpointUrl.host();
+        QHostAddress serverIp(serverIpStr);
+        QHostAddress dnsIp(vpnConfig.dnsServer);
+
+        if (serverIp.isNull() || (serverIp.protocol() != QAbstractSocket::IPv4Protocol && serverIp.protocol() != QAbstractSocket::IPv6Protocol))
         {
-            QMessageBox::critical(this, "Kill Switch Error", "Could not parse server IP from endpoint.");
+            QMessageBox::critical(this, "Kill Switch Error", "Invalid or malicious server IP received: " + serverIpStr);
             return false;
         }
-        qInfo() << "Enabling Kill Switch for server IP:" << serverIp;
+        
+        if (dnsIp.isNull() || (dnsIp.protocol() != QAbstractSocket::IPv4Protocol && dnsIp.protocol() != QAbstractSocket::IPv6Protocol))
+        {
+            QMessageBox::critical(this, "Kill Switch Error", "Invalid or malicious DNS server IP received: " + vpnConfig.dnsServer);
+            return false;
+        }
+        // --- End of Input Validation ---
+
+        qInfo() << "Enabling Kill Switch for server IP:" << serverIp.toString();
 
         // --- Enable Kill Switch ---
         QProcess::execute(program, {"-F"});
-        QProcess::execute(program, {"-P", "INPUT", "ACCEPT"}); // Keep INPUT open
-        QProcess::execute(program, {"-P", "FORWARD", "DROP"}); // Block forwarding
-        QProcess::execute(program, {"-P", "OUTPUT", "DROP"});  // Block all outgoing by default
+        QProcess::execute(program, {"-P", "INPUT", "ACCEPT"});
+        QProcess::execute(program, {"-P", "FORWARD", "DROP"});
+        QProcess::execute(program, {"-P", "OUTPUT", "DROP"});
 
         // Allow essential traffic
         QProcess::execute(program, {"-A", "OUTPUT", "-m", "conntrack", "--ctstate", "ESTABLISHED,RELATED", "-j", "ACCEPT"});
         QProcess::execute(program, {"-A", "OUTPUT", "-o", "lo", "-j", "ACCEPT"});
 
-        // Allow traffic to the VPN server
-        QProcess::execute(program, {"-A", "OUTPUT", "-d", serverIp, "-p", "udp", "--dport", "51820", "-j", "ACCEPT"});
+        // Allow traffic to the VPN server (using the validated IP)
+        QProcess::execute(program, {"-A", "OUTPUT", "-d", serverIp.toString(), "-p", "udp", "--dport", "51820", "-j", "ACCEPT"});
 
-        // **FIX**: Explicitly allow DNS traffic to our chosen DNS server
+        // Explicitly allow DNS traffic to our chosen DNS server (using the validated IP)
         if (!vpnConfig.dnsServer.isEmpty())
         {
-            qInfo() << "Allowing DNS traffic to" << vpnConfig.dnsServer;
-            QProcess::execute(program, {"-A", "OUTPUT", "-d", vpnConfig.dnsServer, "-p", "udp", "--dport", "53", "-j", "ACCEPT"});
-            QProcess::execute(program, {"-A", "OUTPUT", "-d", vpnConfig.dnsServer, "-p", "tcp", "--dport", "53", "-j", "ACCEPT"});
+            qInfo() << "Allowing DNS traffic to" << dnsIp.toString();
+            QProcess::execute(program, {"-A", "OUTPUT", "-d", dnsIp.toString(), "-p", "udp", "--dport", "53", "-j", "ACCEPT"});
+            QProcess::execute(program, {"-A", "OUTPUT", "-d", dnsIp.toString(), "-p", "tcp", "--dport", "53", "-j", "ACCEPT"});
         }
 
         // Allow all traffic going through the VPN tunnel itself
@@ -354,7 +367,7 @@ void MainWindow::resetToLoginState()
     refreshToken.clear();
     clientPublicKey.clear();
     currentUserEmail.clear();
-    vpnConfig = {}; 
+    vpnConfig = {};
 }
 
 void MainWindow::onConnectButtonClicked()
