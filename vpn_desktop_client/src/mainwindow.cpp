@@ -6,6 +6,7 @@
 #include <QThread>
 #include <QCoreApplication>
 #include <QHostAddress>
+#include <QTimer>
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent), ui(new Ui::MainWindow), vpnClient(nullptr), isConnected(false)
@@ -265,9 +266,7 @@ void MainWindow::onDeviceReplyFinished(QNetworkReply *reply)
         // Process UI events to make sure the label updates
         QCoreApplication::processEvents();
 
-        // Wait 2 seconds (2000 milliseconds). This is a more robust delay
-        // to ensure the server's network interface is fully ready.
-        QThread::msleep(2000);
+        QTimer::singleShot(1000, this, &MainWindow::fetchConfigAfterRegistration);
 
         // Now that we've waited, fetch the config
         QNetworkRequest request(QUrl("http://localhost:8080/config"));
@@ -283,6 +282,18 @@ void MainWindow::onDeviceReplyFinished(QNetworkReply *reply)
         QMessageBox::critical(this, "Device Registration Failed", "Error: " + reply->errorString() + ". The public key may already exist for another user.");
     }
     reply->deleteLater();
+}
+
+void MainWindow::fetchConfigAfterRegistration()
+{
+    // This code is moved from onDeviceReplyFinished
+    QNetworkRequest request(QUrl("http://localhost:8080/config"));
+    QString authHeader = "Bearer " + accessToken;
+    request.setRawHeader("Authorization", authHeader.toUtf8());
+
+    QNetworkReply *configReply = networkManager->get(request);
+    connect(configReply, &QNetworkReply::finished, this, [=]()
+            { onConfigReplyFinished(configReply); });
 }
 
 void MainWindow::onConfigReplyFinished(QNetworkReply *reply)
@@ -397,45 +408,50 @@ void MainWindow::onConnectButtonClicked()
             return;
         }
 
-        // **FIX**: Add a small delay to prevent the race condition
-        QThread::msleep(200); // Wait 200 milliseconds
-
-        if (vpn_client_connect(vpnClient,
-                               vpnConfig.clientPrivateKey.toStdString().c_str(),
-                               vpnConfig.clientIp.toStdString().c_str(),
-                               vpnConfig.dnsServer.toStdString().c_str(),
-                               vpnConfig.serverPublicKey.toStdString().c_str(),
-                               vpnConfig.serverEndpoint.toStdString().c_str()) == 0)
-        {
-            ui->statusLabel->setText("Status: Connected");
-            ui->connectButton->setText("Disconnect");
-            isConnected = true;
-        }
-        else
-        {
-            QMessageBox::warning(this, "Connection Failed", "Could not connect to the VPN server.");
-            manageKillSwitch(false);
-        }
+        ui->statusLabel->setText("Status: Connecting...");
+        QTimer::singleShot(200, this, &MainWindow::performVpnConnection);
     }
     else
     {
         if (vpn_client_disconnect(vpnClient) == 0)
         {
-
             ui->statusLabel->setText("Status: Disconnecting...");
-            QCoreApplication::processEvents(); // Update the UI to show the message
-
-            // **FIX**: Add a short delay to allow the OS to clean up the interface
-            QThread::msleep(500); // Wait half a second
-
-            ui->statusLabel->setText("Status: Disconnected");
-            ui->connectButton->setText("Connect");
-            isConnected = false;
-            manageKillSwitch(false);
+            QTimer::singleShot(500, this, &MainWindow::finalizeVpnDisconnection);
         }
         else
         {
             QMessageBox::warning(this, "Disconnection Failed", "Could not disconnect from the VPN server.");
         }
     }
+}
+
+void MainWindow::performVpnConnection()
+{
+    // This code is moved from onConnectButtonClicked
+    if (vpn_client_connect(vpnClient,
+                           vpnConfig.clientPrivateKey.toStdString().c_str(),
+                           vpnConfig.clientIp.toStdString().c_str(),
+                           vpnConfig.dnsServer.toStdString().c_str(),
+                           vpnConfig.serverPublicKey.toStdString().c_str(),
+                           vpnConfig.serverEndpoint.toStdString().c_str()) == 0)
+    {
+        ui->statusLabel->setText("Status: Connected");
+        ui->connectButton->setText("Disconnect");
+        isConnected = true;
+    }
+    else
+    {
+        QMessageBox::warning(this, "Connection Failed", "Could not connect to the VPN server.");
+        manageKillSwitch(false);
+        ui->statusLabel->setText("Status: Disconnected"); // Reset status
+    }
+}
+
+void MainWindow::finalizeVpnDisconnection()
+{
+    // This code is moved from onConnectButtonClicked
+    ui->statusLabel->setText("Status: Disconnected");
+    ui->connectButton->setText("Connect");
+    isConnected = false;
+    manageKillSwitch(false);
 }

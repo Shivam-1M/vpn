@@ -37,6 +37,9 @@ private slots:
     void onConfigReplyFinished(QNetworkReply *reply);
     void onLogoutButtonClicked();
     void onLogoutReplyFinished(QNetworkReply *reply);
+    void performVpnConnection();
+    void finalizeVpnDisconnection();
+    void fetchConfigAfterRegistration();
 
 private:
     void loadOrGenerateKeys();
