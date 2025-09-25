@@ -126,7 +126,7 @@ void MainWindow::loadOrGenerateKeys()
         ui->deviceGroup->setEnabled(false);
 
         QNetworkRequest request(QUrl("http://localhost:8080/config"));
-        QString authHeader = "Bearer " + jwtToken;
+        QString authHeader = "Bearer " + accessToken;
         request.setRawHeader("Authorization", authHeader.toUtf8());
 
         QNetworkReply *configReply = networkManager->get(request);
@@ -168,15 +168,17 @@ void MainWindow::onLoginReplyFinished(QNetworkReply *reply)
         QByteArray response_data = reply->readAll();
         QJsonDocument jsonDoc = QJsonDocument::fromJson(response_data);
         QJsonObject jsonObj = jsonDoc.object();
-
-        if (jsonObj.contains("token") && jsonObj["token"].isString())
+        if (jsonObj.contains("access_token") && jsonObj.contains("refresh_token"))
         {
-            jwtToken = jsonObj["token"].toString();
+            accessToken = jsonObj["access_token"].toString();
+            refreshToken = jsonObj["refresh_token"].toString(); // Store the refresh token
+
+            // Save the refresh token to settings for persistence
+            QSettings settings("MyVpn", "VpnClient");
+            settings.setValue("refreshToken", refreshToken);
+
             QMessageBox::information(this, "Login Success", "Successfully logged in!");
             ui->loginGroup->setEnabled(false);
-
-            // UPDATE: Instead of just enabling the device group,
-            // call our new function to decide what to do next.
             loadOrGenerateKeys();
         }
         else
@@ -209,7 +211,7 @@ void MainWindow::onRegisterDeviceButtonClicked()
 
     QNetworkRequest request(QUrl("http://localhost:8080/devices"));
     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
-    QString authHeader = "Bearer " + jwtToken;
+    QString authHeader = "Bearer " + accessToken;
     request.setRawHeader("Authorization", authHeader.toUtf8());
 
     QNetworkReply *reply = networkManager->post(request, data);
@@ -231,13 +233,13 @@ void MainWindow::onDeviceReplyFinished(QNetworkReply *reply)
         // Process UI events to make sure the label updates
         QCoreApplication::processEvents();
 
-        // Wait 1 second (1000 milliseconds). This is a more robust delay
+        // Wait 2 seconds (2000 milliseconds). This is a more robust delay
         // to ensure the server's network interface is fully ready.
-        QThread::msleep(1000);
+        QThread::msleep(2000);
 
         // Now that we've waited, fetch the config
         QNetworkRequest request(QUrl("http://localhost:8080/config"));
-        QString authHeader = "Bearer " + jwtToken;
+        QString authHeader = "Bearer " + accessToken;
         request.setRawHeader("Authorization", authHeader.toUtf8());
 
         QNetworkReply *configReply = networkManager->get(request);
@@ -302,7 +304,7 @@ void MainWindow::onLogoutButtonClicked()
 
     QNetworkRequest request(QUrl("http://localhost:8080/devices/remove"));
     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
-    QString authHeader = "Bearer " + jwtToken;
+    QString authHeader = "Bearer " + accessToken;
     request.setRawHeader("Authorization", authHeader.toUtf8());
 
     // QNetworkAccessManager doesn't have a direct "delete" method,
@@ -347,7 +349,7 @@ void MainWindow::resetToLoginState()
 
     // Reset internal state
     isConnected = false;
-    jwtToken.clear();
+    accessToken.clear();
     clientPublicKey.clear();
     vpnConfig = {}; // Clear the config struct
 }

@@ -46,8 +46,9 @@ private:
     VpnClient *vpnClient;
     bool isConnected;
     QNetworkAccessManager *networkManager;
-    QString jwtToken;
     QString clientPublicKey;
+    QString accessToken;
+    QString refreshToken;
 
     struct VpnConfig
     {

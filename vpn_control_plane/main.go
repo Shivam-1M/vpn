@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -14,6 +15,7 @@ import (
 
 	pb "vpn_control_plane/vpn" // Import our generated protobuf package
 
+	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
 
@@ -79,9 +81,11 @@ func (i *Ipam) GetNextIP() (string, error) {
 // User represents a user account in the system.
 type User struct {
 	gorm.Model
-	Email    string `gorm:"uniqueIndex;not null"`
-	Password string `gorm:"not null"`
-	Devices  []Device
+	Email              string `gorm:"uniqueIndex;not null"`
+	Password           string `gorm:"not null"`
+	RefreshToken       string `gorm:"uniqueIndex"`
+	RefreshTokenExpiry time.Time
+	Devices            []Device
 }
 
 // Device represents a user's device, identified by its WireGuard public key.
@@ -99,11 +103,15 @@ type AuthRequest struct {
 	Password string `json:"password"`
 }
 
+type TokenResponse struct {
+	AccessToken  string `json:"access_token"`
+	RefreshToken string `json:"refresh_token"`
+}
+
 type DeviceRequest struct {
 	PublicKey string `json:"public_key"`
 }
 
-// UPDATE THIS STRUCT
 type VpnConfigResponse struct {
 	ClientPrivateKey string `json:"client_private_key"`
 	ClientIp         string `json:"client_ip"`
@@ -207,6 +215,7 @@ func main() {
 	http.Handle("/devices", jwtMiddleware(http.HandlerFunc(addDeviceHandler)))
 	http.Handle("/config", jwtMiddleware(http.HandlerFunc(getConfigHandler)))
 	http.Handle("/devices/remove", jwtMiddleware(http.HandlerFunc(removeDeviceHandler)))
+	http.HandleFunc("/refresh", refreshTokenHandler)
 
 	log.Println("Starting VPN Control Plane server on http://localhost:8080")
 	if err := http.ListenAndServe(":8080", nil); err != nil {
@@ -223,7 +232,7 @@ func registerHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(creds.Password), 8)
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(creds.Password), 12)
 	if err != nil {
 		http.Error(w, "Server error, unable to create your account.", http.StatusInternalServerError)
 		return
@@ -260,26 +269,95 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// --- JWT Token Generation ---
-	expirationTime := time.Now().Add(5 * time.Minute)
-	claims := &jwt.RegisteredClaims{
-		Subject:   user.Email,
-		ExpiresAt: jwt.NewNumericDate(expirationTime),
-	}
-
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	tokenString, err := token.SignedString(jwtKey)
+	// 1. Generate Access Token (short-lived, e.g., 15 minutes)
+	accessToken, err := createAccessToken(user.Email)
 	if err != nil {
 		http.Error(w, "Server error, unable to generate token.", http.StatusInternalServerError)
+		return
+	}
+
+	// 2. Generate and store Refresh Token (long-lived, e.g., 7 days)
+	refreshToken, err := createAndStoreRefreshToken(&user)
+	if err != nil {
+		http.Error(w, "Server error, unable to create refresh token.", http.StatusInternalServerError)
+		return
+	}
+
+	// 3. Send both tokens to the client
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(TokenResponse{
+		AccessToken:  accessToken,
+		RefreshToken: refreshToken,
+	})
+	log.Printf("User logged in: %s", creds.Email)
+}
+
+func refreshTokenHandler(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		RefreshToken string `json:"refresh_token"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	var user User
+	result := db.Where("refresh_token = ?", body.RefreshToken).First(&user)
+	if result.Error != nil {
+		http.Error(w, "Invalid refresh token", http.StatusUnauthorized)
+		return
+	}
+
+	// Check if the refresh token has expired
+	if user.RefreshTokenExpiry.Before(time.Now()) {
+		http.Error(w, "Refresh token expired", http.StatusUnauthorized)
+		return
+	}
+
+	// Generate a new access token
+	newAccessToken, err := createAccessToken(user.Email)
+	if err != nil {
+		http.Error(w, "Server error, unable to generate new token.", http.StatusInternalServerError)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{
-		"token": tokenString,
+		"access_token": newAccessToken,
 	})
-	log.Printf("User logged in: %s", creds.Email)
+}
+
+func createAccessToken(email string) (string, error) {
+	// Increased expiration to 15 minutes
+	expirationTime := time.Now().Add(15 * time.Minute)
+	claims := &jwt.RegisteredClaims{
+		Subject:   email,
+		ExpiresAt: jwt.NewNumericDate(expirationTime),
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	return token.SignedString(jwtKey)
+}
+
+func createAndStoreRefreshToken(user *User) (string, error) {
+	// Generate a secure random string for the refresh token
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	refreshToken := hex.EncodeToString(b)
+
+	// Set a long expiry, for example, 7 days
+	expiryTime := time.Now().Add(7 * 24 * time.Hour)
+
+	user.RefreshToken = refreshToken
+	user.RefreshTokenExpiry = expiryTime
+	if err := db.Save(user).Error; err != nil {
+		return "", err
+	}
+
+	return refreshToken, nil
 }
 
 func addDeviceHandler(w http.ResponseWriter, r *http.Request) {
