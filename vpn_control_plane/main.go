@@ -14,10 +14,13 @@ import (
 
 	pb "vpn_control_plane/vpn" // Import our generated protobuf package
 
+	"crypto/tls"
+	"crypto/x509"
+
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/credentials"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
@@ -173,17 +176,29 @@ func main() {
 	}
 
 	// --- gRPC Client Connection ---
-	// Connect to the Rust Data Plane's gRPC server.
-	// NOTE: This will fail until the Rust server is running its gRPC service.
-	conn, err := grpc.Dial("localhost:50051", grpc.WithTransportCredentials(insecure.NewCredentials()))
+	ca_cert, err := os.ReadFile("../certs/ca.pem")
+	if err != nil {
+		log.Fatalf("Could not read CA certificate: %v", err)
+	}
+	certPool := x509.NewCertPool()
+	if !certPool.AppendCertsFromPEM(ca_cert) {
+		log.Fatal("Failed to append CA certificate")
+	}
+
+	// Note: For local testing, ServerName must match the CN in the server's cert ('localhost')
+	tlsConfig := &tls.Config{
+		ServerName: "localhost",
+		RootCAs:    certPool,
+	}
+
+	creds := credentials.NewTLS(tlsConfig)
+	conn, err := grpc.Dial("localhost:50051", grpc.WithTransportCredentials(creds))
 	if err != nil {
 		log.Fatalf("Did not connect to gRPC server: %v", err)
 	}
-	// We will defer closing the connection until the application exits.
-	// In a real-world scenario with retries, this logic would be more robust.
-	// defer conn.Close()
+
 	vpnClient = pb.NewVpnManagerClient(conn)
-	log.Println("gRPC client connected to data plane.")
+	log.Println("Secure gRPC client connected to data plane.")
 
 	// --- API Routes ---
 	http.HandleFunc("/register", registerHandler)

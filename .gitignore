@@ -1,42 +1,52 @@
-###############################
-# General
-###############################
+# OS generated files
 .DS_Store
-*.log
-*.tmp
+Thumbs.db
+
+# Editor/IDE folders and files
+.vscode/
+.idea/
 *.swp
 *.swo
+*.tmp
+*.log
+*~
 *.bak
 *.old
-node_modules/
-__pycache__/
-*.pyc
-*.pyo
-*.env
-.env*
+*.orig
 
-###############################
-# Rust (vpn_client_core, vpn_data_plane)
-###############################
+# Rust projects
 target/
-**/target/
 Cargo.lock
+**/*.rs.bk
+*.d
+*.rlib
+*.rmeta
+*.so
+*.json
+CACHEDIR.TAG
 
-###############################
-# Go (vpn_control_plane)
-###############################
+# Go project
+bin/
 *.exe
 *.test
 *.out
+go-build/
 *.mod
 *.sum
-bin/
+**/vpn_control_plane
 
-###############################
-# CMake/C++ (vpn_desktop_client)
-###############################
+# Docker Compose
+docker-compose.override.yml
+docker-compose.*.yml
+postgres_data/
+
+# Protobuf and gRPC generated files
+*.pb.go
+*.pb.rs
+# Keep .proto files
+
+# CMake/C++ project
 build/
-**/build/
 CMakeFiles/
 CMakeCache.txt
 cmake_install.cmake
@@ -60,51 +70,34 @@ Makefile
 *.qrc
 *.rcc
 *.autosave
-*.pro.user
-*.pro.user.*
-*.pro.user.1
-*.pro.user.2
-*.pro.user.3
-*.pro.user.4
-*.pro.user.5
-*.pro.user.6
-*.pro.user.7
-*.pro.user.8
-*.pro.user.9
-*.pro.user.10
-*.pro.user.11
-*.pro.user.12
-*.pro.user.13
-*.pro.user.14
-*.pro.user.15
-*.pro.user.16
-*.pro.user.17
-*.pro.user.18
-*.pro.user.19
-*.pro.user.20
+*.pro.user*
 
-###############################
-# IDE/editor files
-###############################
-.vscode/
-.idea/
-*.sublime-workspace
-*.sublime-project
-*.code-workspace
+**/VpnDesktopClient
 
-###############################
+# Keys and secrets
+*.key
+*.pem
+*.crt
+certs/
+.env
+.env.*
+
+# Node/npm (if ever used)
+node_modules/
+
+# Coverage and test output
+coverage/
+*.coverprofile
+*.lcov
+
+# Python (if ever used)
+*.pyc
+__pycache__/
+
 # Miscellaneous
-###############################
-CACHEDIR.TAG
 *.pid
 *.lock
 *.cache
-*.bak
-*.tmp
-*.orig
-*.rej
-*.swo
-*.swp
 *.zip
 *.tar.gz
 *.tgz
@@ -121,132 +114,3 @@ CACHEDIR.TAG
 *.map
 *.core
 *.stackdump
-*.out
-*.log# OS generated files
-.DS_Store
-Thumbs.db
-
-# Editor/IDE folders and files
-.vscode/
-.idea/
-*.swp
-*.swo
-*.tmp
-*.log
-*~
-*.bak
-*.old
-*.orig
-
-# Rust (vpn_data_plane)
-target/
-Cargo.lock
-Cargo.toml
-build.rs
-**/*.rs.bk
-*.d
-*.rlib
-*.rmeta
-*.so
-*.json
-
-# Go (vpn_control_plane)
-bin/
-*.exe
-*.test
-*.out
-go-build/
-*.mod
-*.sum
-main.go
-docker-compose.yml
-docker-compose.override.yml
-docker-compose.*.yml
-
-# Protobuf and gRPC generated files
-*.pb.go
-*.pb.rs
-*.proto
-
-# Database volumes
-postgres_data/
-
-# Keys and secrets
-client.key
-client.pub
-.env
-.env.*
-
-# Node/npm (if ever used)
-node_modules/
-
-# Coverage and test output
-coverage/
-*.coverprofile
-*.lcov
-
-# Python (if ever used)
-*.pyc
-__pycache__/
-
-# Ignore all at root that should not be versioned
-!.gitignore
-
-# Top-level .gitignore for the VPN project
-
-# OS generated files
-.DS_Store
-Thumbs.db
-
-# Editor/IDE folders and files
-.vscode/
-.idea/
-*.swp
-*.swo
-*.tmp
-*.log
-*~
-*.bak
-*.old
-*.orig
-
-# Rust (vpn_data_plane)
-
-**/*.rs.bk
-Cargo.lock
-
-# Go (vpn_control_plane)
-bin/
-*.exe
-*.test
-*.out
-go-build/
-*.mod
-*.sum
-
-# Docker Compose
-docker-compose.override.yml
-docker-compose.*.yml
-postgres_data/
-
-# Database volumes
-postgres_data/
-
-# Node/npm (if ever used)
-node_modules/
-
-# Coverage and test output
-coverage/
-*.coverprofile
-*.lcov
-
-# Python (if ever used)
-*.pyc
-__pycache__/
-
-# Environment files
-.env
-.env.*
-
-# Ignore all at root that should not be versioned
-!.gitignore

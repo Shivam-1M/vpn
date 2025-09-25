@@ -1,0 +1,17 @@
+[package]
+name = "vpn_client_core"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+defguard_wireguard_rs = "0.7.6"
+tokio = { version = "1", features = ["full"] }
+base64 = "0.22.1"
+# NEW: Crate for executing commands with a timeout to prevent freezes
+wait-timeout = "0.2"
+
+rand = "0.8.5"
+x25519-dalek = "2.0.1"

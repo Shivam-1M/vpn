@@ -1,0 +1,24 @@
+syntax = "proto3";
+
+package vpn;
+
+// The gRPC service definition for managing WireGuard peers.
+service VpnManager {
+  // Adds a new peer (a client device) to the WireGuard interface.
+  rpc AddPeer (PeerRequest) returns (PeerResponse) {}
+
+  // Removes a peer from the WireGuard interface.
+  rpc RemovePeer (PeerRequest) returns (PeerResponse) {}
+}
+
+// The request message containing a peer's public key.
+message PeerRequest {
+  string public_key = 1;
+  string ip_address = 2;
+}
+
+// The response message indicating the result of an operation.
+message PeerResponse {
+  bool success = 1;
+  string message = 2;
+}

@@ -6,7 +6,10 @@ use log;
 use std::env;
 use std::error::Error;
 use std::sync::Arc;
-use tonic::{transport::Server, Request, Response, Status};
+use tonic::{
+    transport::{Identity, Server, ServerTlsConfig},
+    Request, Response, Status,
+};
 use x25519_dalek::{PublicKey, StaticSecret};
 
 pub mod vpn {
@@ -124,6 +127,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
         "utun3".into()
     };
 
+    if let Ok(cleanup_api) = WGApi::<Userspace>::new(ifname.clone()) {
+        if let Err(e) = cleanup_api.remove_interface() {
+            log::warn!(
+                "Attempted to clean up stale interface, but it might not have existed: {}",
+                e
+            );
+        } else {
+            log::info!("Successfully cleaned up stale '{}' interface.", ifname);
+        }
+    }
+
     let server_private_key_b64 =
         env::var("WG_PRIVATE_KEY").expect("FATAL: WG_PRIVATE_KEY environment variable not set.");
 
@@ -161,17 +175,20 @@ async fn main() -> Result<(), Box<dyn Error>> {
     };
     let grpc_server = VpnManagerServer::new(vpn_service);
 
-    log::info!("gRPC server listening on {}", grpc_addr);
+    log::info!("Loading TLS certificates...");
 
-    tokio::spawn(async move {
-        if let Err(e) = Server::builder()
-            .add_service(grpc_server)
-            .serve(grpc_addr)
-            .await
-        {
-            log::error!("gRPC server failed: {}", e);
-        }
-    });
+    let cert = tokio::fs::read("../certs/server.pem").await?;
+    let key = tokio::fs::read("../certs/server.key").await?;
+    let identity = Identity::from_pem(cert, key);
+    let tls_config = ServerTlsConfig::new().identity(identity);
+
+    log::info!("gRPC server listening securely on {}", grpc_addr);
+
+    Server::builder()
+        .tls_config(tls_config)?
+        .add_service(grpc_server)
+        .serve(grpc_addr)
+        .await?;
 
     tokio::time::sleep(tokio::time::Duration::from_secs(u64::MAX)).await;
 
