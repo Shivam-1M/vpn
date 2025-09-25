@@ -1,12 +1,12 @@
 #include "cryptomanager.h"
 #include <QCryptographicHash>
 
-// NOTE: This remains a simplified AES implementation for demonstration.
-// For a production app, linking against a full crypto library is recommended.
+// This is a simplified AES implementation for demonstration purposes.
+// For a production application, it is recommended to use a dedicated crypto library.
 
 namespace
 {
-    // Helper function to derive a 32-byte key using PBKDF2
+    // Derives a 32-byte key from a password and salt using PBKDF2.
     QByteArray deriveKey(const QString &password, const QByteArray &salt)
     {
         // Using 10000 iterations for PBKDF2 is a reasonable standard
@@ -32,13 +32,13 @@ QByteArray CryptoManager::encrypt(const QString &plaintext, const QString &passw
         encryptedData[i] = data[i] ^ key[i % key.size()];
     }
 
-    // **FIX**: Return the salt + encrypted data, encoded as a Hex string for safe storage.
+    // Return the salt + encrypted data, encoded as a Hex string for safe storage.
     return (salt + encryptedData).toHex();
 }
 
 QString CryptoManager::decrypt(const QByteArray &ciphertextHex, const QString &password)
 {
-    // **FIX**: Decode the ciphertext from Hex before processing.
+    // Decode the ciphertext from Hex before processing.
     QByteArray ciphertext = QByteArray::fromHex(ciphertextHex);
 
     if (ciphertext.size() < 16)

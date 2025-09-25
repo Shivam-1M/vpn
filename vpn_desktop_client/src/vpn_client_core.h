@@ -12,7 +12,6 @@ extern "C"
 {
 #endif
 
-    // ADD THIS STRUCT
     typedef struct VpnKeyPair
     {
         char *public_key;
@@ -26,7 +25,6 @@ extern "C"
     char* vpn_get_public_key(const char* private_key);
 
     // Declare the functions from the Rust library.
-    // ADD THESE TWO FUNCTIONS
     VpnKeyPair vpn_generate_keypair();
     void vpn_free_string(char *s);
 

@@ -7,12 +7,22 @@ use std::ffi::{c_char, c_int, CStr, CString};
 use tokio::runtime::Runtime;
 use x25519_dalek::{PublicKey, StaticSecret};
 
+/// A key pair for the VPN client.
 #[repr(C)]
 pub struct VpnKeyPair {
     pub public_key: *mut c_char,
     pub private_key: *mut c_char,
 }
 
+/// Derives a public key from a private key.
+///
+/// # Arguments
+///
+/// * `private_key_b64` - The private key encoded in base64.
+///
+/// # Returns
+///
+/// The public key encoded in base64.
 #[no_mangle]
 pub extern "C" fn vpn_get_public_key(private_key_b64: *const c_char) -> *mut c_char {
     if private_key_b64.is_null() {
@@ -22,10 +32,8 @@ pub extern "C" fn vpn_get_public_key(private_key_b64: *const c_char) -> *mut c_c
         .to_str()
         .unwrap_or("");
 
-    // FIX: Be explicit about the type conversion
     let private_key_bytes: [u8; 32] = match general_purpose::STANDARD.decode(private_key_str) {
         Ok(bytes) if bytes.len() == 32 => {
-            // This is the clear, unambiguous way to convert a Vec<u8> to [u8; 32]
             let mut arr = [0u8; 32];
             arr.copy_from_slice(&bytes);
             arr
@@ -41,6 +49,7 @@ pub extern "C" fn vpn_get_public_key(private_key_b64: *const c_char) -> *mut c_c
         .into_raw()
 }
 
+/// Generates a new key pair.
 #[no_mangle]
 pub extern "C" fn vpn_generate_keypair() -> VpnKeyPair {
     let secret = StaticSecret::random_from_rng(OsRng);
@@ -56,6 +65,7 @@ pub extern "C" fn vpn_generate_keypair() -> VpnKeyPair {
     }
 }
 
+/// Frees a string that was allocated by this library.
 #[no_mangle]
 pub unsafe extern "C" fn vpn_free_string(s: *mut c_char) {
     if !s.is_null() {
@@ -63,12 +73,14 @@ pub unsafe extern "C" fn vpn_free_string(s: *mut c_char) {
     }
 }
 
+/// The VPN client.
 pub struct VpnClient {
     runtime: Runtime,
     ifname: String,
     wgapi: Option<WGApi<Userspace>>,
 }
 
+/// Creates a new VPN client.
 #[no_mangle]
 pub extern "C" fn vpn_client_create() -> *mut VpnClient {
     let ifname = if cfg!(target_os = "linux") || cfg!(target_os = "freebsd") {
@@ -93,6 +105,7 @@ pub extern "C" fn vpn_client_create() -> *mut VpnClient {
     }
 }
 
+/// Destroys a VPN client.
 #[no_mangle]
 pub unsafe extern "C" fn vpn_client_destroy(client_ptr: *mut VpnClient) {
     if !client_ptr.is_null() {
@@ -100,6 +113,7 @@ pub unsafe extern "C" fn vpn_client_destroy(client_ptr: *mut VpnClient) {
     }
 }
 
+/// Connects the VPN client to the server.
 #[no_mangle]
 pub extern "C" fn vpn_client_connect(
     client_ptr: *mut VpnClient,
@@ -136,7 +150,6 @@ pub extern "C" fn vpn_client_connect(
         return -1;
     }
 
-    // FIX #1: Remove the second argument from WGApi::new()
     if let Ok(cleanup_api) = WGApi::<Userspace>::new(client.ifname.clone()) {
         let _ = cleanup_api.remove_interface();
         println!("[VPN_CORE] Cleaned up any stale VPN interface.");
@@ -170,7 +183,6 @@ pub extern "C" fn vpn_client_connect(
             server_endpoint
         );
 
-        // FIX #2: Remove the second argument from WGApi::new()
         let new_wgapi = match WGApi::<Userspace>::new(client.ifname.clone()) {
             Ok(api) => api,
             Err(e) => {
@@ -196,7 +208,6 @@ pub extern "C" fn vpn_client_connect(
             name: client.ifname.clone(),
             prvkey: client_privkey.to_string(),
             addresses: vec![client_address],
-            // FIX #3: Change Some(0) to just 0
             port: 0,
             peers: vec![peer],
             mtu: None,
@@ -220,6 +231,7 @@ pub extern "C" fn vpn_client_connect(
     })
 }
 
+/// Disconnects the VPN client from the server.
 #[no_mangle]
 pub extern "C" fn vpn_client_disconnect(client_ptr: *mut VpnClient) -> c_int {
     if client_ptr.is_null() {

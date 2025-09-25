@@ -113,6 +113,7 @@ bool MainWindow::manageKillSwitch(bool enable)
     return true;
 }
 
+// Loads the private key from settings or prompts the user to register the device.
 void MainWindow::loadOrGenerateKeys()
 {
     QSettings settings("MyVpn", "VpnClient");
@@ -162,6 +163,7 @@ void MainWindow::loadOrGenerateKeys()
     }
 }
 
+// Handles the login button click.
 void MainWindow::onLoginButtonClicked()
 {
     QString email = ui->emailLineEdit->text();
@@ -189,6 +191,7 @@ void MainWindow::onLoginButtonClicked()
 
 void MainWindow::onLoginReplyFinished(QNetworkReply *reply)
 {
+    // Handles the reply from the login request.
     if (reply->error() == QNetworkReply::NoError)
     {
         QByteArray response_data = reply->readAll();
@@ -221,6 +224,7 @@ void MainWindow::onLoginReplyFinished(QNetworkReply *reply)
     reply->deleteLater();
 }
 
+// Handles the register device button click.
 void MainWindow::onRegisterDeviceButtonClicked()
 {
     // 1. Generate a new key pair
@@ -249,6 +253,7 @@ void MainWindow::onRegisterDeviceButtonClicked()
 
 void MainWindow::onDeviceReplyFinished(QNetworkReply *reply)
 {
+    // Handles the reply from the device registration request.
     if (reply->error() == QNetworkReply::NoError)
     {
         QMessageBox::information(this, "Device Registered", "Device successfully registered!");
@@ -261,7 +266,6 @@ void MainWindow::onDeviceReplyFinished(QNetworkReply *reply)
         QByteArray encryptedKeyHex = CryptoManager::encrypt(vpnConfig.clientPrivateKey, password);
         settings.setValue(settingsKey, encryptedKeyHex); // Save the hex-encoded byte array
 
-        // **FIX**: Show a status message and use a more reliable delay
         ui->statusLabel->setText("Status: Finalizing setup...");
         // Process UI events to make sure the label updates
         QCoreApplication::processEvents();
@@ -284,6 +288,7 @@ void MainWindow::onDeviceReplyFinished(QNetworkReply *reply)
     reply->deleteLater();
 }
 
+// Fetches the VPN configuration from the server after a short delay.
 void MainWindow::fetchConfigAfterRegistration()
 {
     // This code is moved from onDeviceReplyFinished
@@ -298,7 +303,7 @@ void MainWindow::fetchConfigAfterRegistration()
 
 void MainWindow::onConfigReplyFinished(QNetworkReply *reply)
 {
-    // ... (This function remains mostly unchanged)
+    // Handles the reply from the config request.
     if (reply->error() == QNetworkReply::NoError)
     {
         QByteArray response_data = reply->readAll();
@@ -359,6 +364,7 @@ void MainWindow::onLogoutButtonClicked()
 
 void MainWindow::onLogoutReplyFinished(QNetworkReply *reply)
 {
+    // Handles the reply from the logout request.
     if (reply->error() == QNetworkReply::NoError)
     {
         QMessageBox::information(this, "Logged Out", "Device successfully removed from your account.");

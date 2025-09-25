@@ -18,12 +18,14 @@ pub mod vpn {
 use vpn::vpn_manager_server::{VpnManager, VpnManagerServer};
 use vpn::{PeerRequest, PeerResponse};
 
+/// The gRPC service for managing the VPN.
 pub struct VpnManagerService {
     wgapi: Arc<WGApi<Userspace>>,
 }
 
 #[tonic::async_trait]
 impl VpnManager for VpnManagerService {
+    /// Adds a peer to the VPN.
     async fn add_peer(
         &self,
         request: Request<PeerRequest>,
@@ -55,7 +57,6 @@ impl VpnManager for VpnManagerService {
 
         let public_key = defguard_wireguard_rs::key::Key::new(public_key_bytes);
         let mut peer = Peer::new(public_key);
-        // FIX: Use the IP address from the request, not a hardcoded value
         peer.allowed_ips.push(allowed_ip);
 
         if let Err(e) = self.wgapi.configure_peer(&peer) {
@@ -74,6 +75,7 @@ impl VpnManager for VpnManagerService {
         Ok(Response::new(reply))
     }
 
+    /// Removes a peer from the VPN.
     async fn remove_peer(
         &self,
         request: Request<PeerRequest>,
@@ -84,7 +86,6 @@ impl VpnManager for VpnManagerService {
             public_key_b64
         );
 
-        // FIX: Convert the base64 string into a Key struct before using it.
         let public_key_bytes = match general_purpose::STANDARD.decode(&public_key_b64) {
             Ok(bytes) if bytes.len() == 32 => {
                 let mut arr = [0u8; 32];
@@ -156,7 +157,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
         name: ifname,
         prvkey: server_private_key_b64.to_string(),
         addresses: vec!["10.10.10.1/24".parse()?],
-        // FIX: Change Some(51820) to just 51820
         port: 51820,
         peers: vec![],
         mtu: None,
