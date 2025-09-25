@@ -10,6 +10,8 @@
 #include <QProcess>
 
 #include "vpn_client_core.h"
+#include "mainwindow.h"
+#include "cryptomanager.h"
 
 QT_BEGIN_NAMESPACE
 namespace Ui

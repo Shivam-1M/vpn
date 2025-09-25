@@ -63,7 +63,7 @@ bool MainWindow::manageKillSwitch(bool enable)
             QMessageBox::critical(this, "Kill Switch Error", "Invalid or malicious server IP received: " + serverIpStr);
             return false;
         }
-        
+
         if (dnsIp.isNull() || (dnsIp.protocol() != QAbstractSocket::IPv4Protocol && dnsIp.protocol() != QAbstractSocket::IPv6Protocol))
         {
             QMessageBox::critical(this, "Kill Switch Error", "Invalid or malicious DNS server IP received: " + vpnConfig.dnsServer);
@@ -115,16 +115,30 @@ bool MainWindow::manageKillSwitch(bool enable)
 void MainWindow::loadOrGenerateKeys()
 {
     QSettings settings("MyVpn", "VpnClient");
-    QString settingsKey = currentUserEmail + "_clientPrivateKey";
-    QString savedPrivateKey = settings.value(settingsKey).toString();
+    QString settingsKey = currentUserEmail + "_clientPrivateKey_encrypted";
 
-    if (savedPrivateKey.isEmpty())
+    // Load the hex-encoded byte array from settings
+    QByteArray encryptedPrivateKeyHex = settings.value(settingsKey).toByteArray();
+
+    if (encryptedPrivateKeyHex.isEmpty())
     {
         QMessageBox::information(this, "New Device", "No keys found. Please register this device.");
         ui->deviceGroup->setEnabled(true);
     }
     else
     {
+        // Decrypt the key using the password
+        QString password = ui->passwordLineEdit->text();
+        QString savedPrivateKey = CryptoManager::decrypt(encryptedPrivateKeyHex, password);
+
+        if (savedPrivateKey.isEmpty())
+        {
+            QMessageBox::warning(this, "Decryption Failed", "Could not decrypt saved keys. Please re-register this device.");
+            settings.remove(settingsKey); // Remove the corrupted key
+            ui->deviceGroup->setEnabled(true);
+            return;
+        }
+
         QMessageBox::information(this, "Device Found", "Loading existing keys for this device.");
         vpnConfig.clientPrivateKey = savedPrivateKey;
 
@@ -239,8 +253,12 @@ void MainWindow::onDeviceReplyFinished(QNetworkReply *reply)
         QMessageBox::information(this, "Device Registered", "Device successfully registered!");
 
         QSettings settings("MyVpn", "VpnClient");
-        QString settingsKey = currentUserEmail + "_clientPrivateKey";
-        settings.setValue(settingsKey, vpnConfig.clientPrivateKey);
+        QString settingsKey = currentUserEmail + "_clientPrivateKey_encrypted";
+
+        // Encrypt the key before saving
+        QString password = ui->passwordLineEdit->text();
+        QByteArray encryptedKeyHex = CryptoManager::encrypt(vpnConfig.clientPrivateKey, password);
+        settings.setValue(settingsKey, encryptedKeyHex); // Save the hex-encoded byte array
 
         // **FIX**: Show a status message and use a more reliable delay
         ui->statusLabel->setText("Status: Finalizing setup...");

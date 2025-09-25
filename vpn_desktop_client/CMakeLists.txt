@@ -45,6 +45,8 @@ add_executable(VpnDesktopClient
   src/mainwindow.h
   src/mainwindow.ui
   src/vpn_client_core.h
+  src/cryptomanager.cpp
+  src/cryptomanager.h
 )
 
 # Link the Qt6 libraries to our executable.
