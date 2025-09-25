@@ -99,11 +99,11 @@ bool MainWindow::manageKillSwitch(bool enable)
     return true;
 }
 
-// ADD THIS ENTIRE FUNCTION
 void MainWindow::loadOrGenerateKeys()
 {
     QSettings settings("MyVpn", "VpnClient");
-    QString savedPrivateKey = settings.value("clientPrivateKey").toString();
+    QString settingsKey = currentUserEmail + "_clientPrivateKey";
+    QString savedPrivateKey = settings.value(settingsKey).toString();
 
     if (savedPrivateKey.isEmpty())
     {
@@ -115,7 +115,6 @@ void MainWindow::loadOrGenerateKeys()
         QMessageBox::information(this, "Device Found", "Loading existing keys for this device.");
         vpnConfig.clientPrivateKey = savedPrivateKey;
 
-        // **FIX**: Derive the public key from the loaded private key.
         char *pubKeyCStr = vpn_get_public_key(savedPrivateKey.toStdString().c_str());
         if (pubKeyCStr)
         {
@@ -137,7 +136,6 @@ void MainWindow::loadOrGenerateKeys()
 
 void MainWindow::onLoginButtonClicked()
 {
-    // ... (This function remains unchanged)
     QString email = ui->emailLineEdit->text();
     QString password = ui->passwordLineEdit->text();
 
@@ -170,6 +168,8 @@ void MainWindow::onLoginReplyFinished(QNetworkReply *reply)
         QJsonObject jsonObj = jsonDoc.object();
         if (jsonObj.contains("access_token") && jsonObj.contains("refresh_token"))
         {
+            currentUserEmail = ui->emailLineEdit->text();
+
             accessToken = jsonObj["access_token"].toString();
             refreshToken = jsonObj["refresh_token"].toString(); // Store the refresh token
 
@@ -226,7 +226,8 @@ void MainWindow::onDeviceReplyFinished(QNetworkReply *reply)
         QMessageBox::information(this, "Device Registered", "Device successfully registered!");
 
         QSettings settings("MyVpn", "VpnClient");
-        settings.setValue("clientPrivateKey", vpnConfig.clientPrivateKey);
+        QString settingsKey = currentUserEmail + "_clientPrivateKey";
+        settings.setValue(settingsKey, vpnConfig.clientPrivateKey);
 
         // **FIX**: Show a status message and use a more reliable delay
         ui->statusLabel->setText("Status: Finalizing setup...");
@@ -350,8 +351,10 @@ void MainWindow::resetToLoginState()
     // Reset internal state
     isConnected = false;
     accessToken.clear();
+    refreshToken.clear();
     clientPublicKey.clear();
-    vpnConfig = {}; // Clear the config struct
+    currentUserEmail.clear();
+    vpnConfig = {}; 
 }
 
 void MainWindow::onConnectButtonClicked()

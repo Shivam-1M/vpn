@@ -7,9 +7,9 @@
 #include <QJsonObject>
 #include <QJsonDocument>
 #include <QSettings>
-#include <QProcess> // ADD THIS
+#include <QProcess>
 
-#include "vpn_client_core.h" // Include our Rust library header
+#include "vpn_client_core.h"
 
 QT_BEGIN_NAMESPACE
 namespace Ui
@@ -38,7 +38,6 @@ private slots:
 
 private:
     void loadOrGenerateKeys();
-    // ADD THIS FUNCTION
     bool manageKillSwitch(bool enable);
     void resetToLoginState();
 
@@ -49,6 +48,7 @@ private:
     QString clientPublicKey;
     QString accessToken;
     QString refreshToken;
+    QString currentUserEmail;
 
     struct VpnConfig
     {
