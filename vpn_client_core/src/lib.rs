@@ -239,10 +239,17 @@ pub extern "C" fn vpn_client_disconnect(client_ptr: *mut VpnClient) -> c_int {
     }
     let client = unsafe { &mut *client_ptr };
 
-    println!("[VPN_CORE] DNS and firewall rules would be reverted upon disconnect.");
-
     if let Some(wgapi) = client.wgapi.take() {
-        drop(wgapi);
+        println!("[VPN_CORE] Disconnecting and removing WireGuard interface...");
+        // Explicitly remove the interface for clarity and error handling.
+        if let Err(e) = wgapi.remove_interface() {
+            eprintln!("[VPN_CORE] Failed to remove interface on disconnect: {:?}. It might have already been removed.", e);
+        } else {
+            println!("[VPN_CORE] WireGuard interface removed successfully.");
+        }
+    } else {
+        // This is not an error, it just means we weren't connected.
+        println!("[VPN_CORE] No active VPN connection to disconnect.");
     }
 
     0

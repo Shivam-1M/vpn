@@ -433,7 +433,12 @@ void MainWindow::onConnectButtonClicked()
 
 void MainWindow::performVpnConnection()
 {
-    // This code is moved from onConnectButtonClicked
+    // Proactively disconnect to ensure a clean slate.
+    vpn_client_disconnect(vpnClient);
+
+    // Give the OS a moment to release the network interface.
+    QThread::msleep(100);
+
     if (vpn_client_connect(vpnClient,
                            vpnConfig.clientPrivateKey.toStdString().c_str(),
                            vpnConfig.clientIp.toStdString().c_str(),
@@ -455,7 +460,6 @@ void MainWindow::performVpnConnection()
 
 void MainWindow::finalizeVpnDisconnection()
 {
-    // This code is moved from onConnectButtonClicked
     ui->statusLabel->setText("Status: Disconnected");
     ui->connectButton->setText("Connect");
     isConnected = false;
