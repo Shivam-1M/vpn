@@ -8,8 +8,10 @@
 #include <QHostAddress>
 #include <QTimer>
 
+const int MAX_RECONNECT_ATTEMPTS = 3;
+
 MainWindow::MainWindow(QWidget *parent)
-    : QMainWindow(parent), ui(new Ui::MainWindow), vpnClient(nullptr), isConnected(false)
+    : QMainWindow(parent), ui(new Ui::MainWindow), vpnClient(nullptr), isConnected(false), isReconnecting(false), reconnectionAttempts(0)
 {
     ui->setupUi(this);
 
@@ -22,6 +24,13 @@ MainWindow::MainWindow(QWidget *parent)
     }
 
     networkManager = new QNetworkAccessManager(this);
+
+    QNetworkInformation *netInfo = QNetworkInformation::instance();
+    if (netInfo)
+    {
+        connect(netInfo, &QNetworkInformation::reachabilityChanged,
+                this, &MainWindow::onReachabilityChanged);
+    }
 
     connect(ui->connectButton, &QPushButton::clicked, this, &MainWindow::onConnectButtonClicked);
     connect(ui->loginButton, &QPushButton::clicked, this, &MainWindow::onLoginButtonClicked);
@@ -431,12 +440,72 @@ void MainWindow::onConnectButtonClicked()
     }
 }
 
+void MainWindow::attemptReconnection()
+{
+    if (!isConnected)
+    {
+        isReconnecting = false;
+        return;
+    }
+
+    reconnectionAttempts++;
+    if (reconnectionAttempts > MAX_RECONNECT_ATTEMPTS)
+    {
+        qCritical() << "VPN reconnection failed after" << MAX_RECONNECT_ATTEMPTS << "attempts.";
+        QMessageBox::critical(this, "Reconnection Failed",
+                              "Could not re-establish VPN connection. "
+                              "The kill switch has been disabled to restore internet access. "
+                              "Please reconnect manually.");
+        manageKillSwitch(false);
+        finalizeVpnDisconnection();
+        isReconnecting = false;
+        return;
+    }
+
+    // Check if we have an internet connection before trying to reconnect
+    if (!isOnline())
+    {
+        ui->statusLabel->setText(QString("Status: Waiting for internet... (Attempt %1)")
+                                     .arg(reconnectionAttempts));
+        // Wait 5 seconds before checking for internet again
+        QTimer::singleShot(5000, this, &MainWindow::attemptReconnection);
+        return;
+    }
+
+    ui->statusLabel->setText(QString("Status: Reconnecting... (Attempt %1 of %2)")
+                                 .arg(reconnectionAttempts)
+                                 .arg(MAX_RECONNECT_ATTEMPTS));
+
+    performVpnConnection();
+}
+
+bool MainWindow::isOnline() const
+{
+    const auto reachability = QNetworkInformation::instance()->reachability();
+    return reachability == QNetworkInformation::Reachability::Online;
+}
+
+void MainWindow::onReachabilityChanged(QNetworkInformation::Reachability reachability)
+{
+    qWarning() << "Network reachability changed to:" << reachability;
+
+    // If we were connected and the network drops to a disconnected or unknown state...
+    if (isConnected && !isReconnecting && reachability < QNetworkInformation::Reachability::Local)
+    {
+        qWarning() << "Network connection lost. Attempting to re-establish VPN connection.";
+        isReconnecting = true;
+        reconnectionAttempts = 0; // Reset counter
+        ui->statusLabel->setText("Status: Network connection lost. Reconnecting...");
+
+        // Start the reconnection process
+        attemptReconnection();
+    }
+}
+
 void MainWindow::performVpnConnection()
 {
-    // Proactively disconnect to ensure a clean slate.
     vpn_client_disconnect(vpnClient);
 
-    // Give the OS a moment to release the network interface.
     QThread::msleep(100);
 
     if (vpn_client_connect(vpnClient,
@@ -449,12 +518,23 @@ void MainWindow::performVpnConnection()
         ui->statusLabel->setText("Status: Connected");
         ui->connectButton->setText("Disconnect");
         isConnected = true;
+        isReconnecting = false;
+        reconnectionAttempts = 0;
     }
     else
     {
-        QMessageBox::warning(this, "Connection Failed", "Could not connect to the VPN server.");
-        manageKillSwitch(false);
-        ui->statusLabel->setText("Status: Disconnected"); // Reset status
+        if (isReconnecting)
+        {
+            qWarning() << "Reconnection attempt" << reconnectionAttempts << "failed.";
+            // Wait 3 seconds before the next attempt
+            QTimer::singleShot(3000, this, &MainWindow::attemptReconnection);
+        }
+        else // This was a manual connection attempt that failed
+        {
+            QMessageBox::warning(this, "Connection Failed", "Could not connect to the VPN server.");
+            manageKillSwitch(false);
+            ui->statusLabel->setText("Status: Disconnected"); // Reset status
+        }
     }
 }
 
@@ -463,5 +543,6 @@ void MainWindow::finalizeVpnDisconnection()
     ui->statusLabel->setText("Status: Disconnected");
     ui->connectButton->setText("Connect");
     isConnected = false;
+    isReconnecting = false;
     manageKillSwitch(false);
 }

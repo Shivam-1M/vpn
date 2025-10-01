@@ -8,6 +8,7 @@
 #include <QJsonDocument>
 #include <QSettings>
 #include <QProcess>
+#include <QNetworkInformation>
 
 #include "vpn_client_core.h"
 #include "mainwindow.h"
@@ -40,11 +41,14 @@ private slots:
     void performVpnConnection();
     void finalizeVpnDisconnection();
     void fetchConfigAfterRegistration();
+    void onReachabilityChanged(QNetworkInformation::Reachability reachability);
+    void attemptReconnection();
 
 private:
     void loadOrGenerateKeys();
     bool manageKillSwitch(bool enable);
     void resetToLoginState();
+    bool isOnline() const;
 
     Ui::MainWindow *ui;
     VpnClient *vpnClient;
@@ -54,6 +58,9 @@ private:
     QString accessToken;
     QString refreshToken;
     QString currentUserEmail;
+
+    bool isReconnecting;
+    int reconnectionAttempts;
 
     struct VpnConfig
     {
