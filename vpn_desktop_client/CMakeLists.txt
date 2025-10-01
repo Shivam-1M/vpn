@@ -47,6 +47,9 @@ add_executable(VpnDesktopClient
   src/cryptomanager.h
 )
 
+# Add the recovery tool subdirectory to the build process
+add_subdirectory(recovery_tool)
+
 # Link the Qt6 libraries to our executable.
 target_link_libraries(VpnDesktopClient
   PRIVATE
