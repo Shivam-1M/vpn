@@ -1,5 +1,6 @@
 #include "mainwindow.h"
 #include "ui_mainwindow.h"
+#include "signupdialog.h"
 
 #include <QMessageBox>
 #include <QUrl>
@@ -36,6 +37,21 @@ MainWindow::MainWindow(QWidget *parent)
     connect(ui->loginButton, &QPushButton::clicked, this, &MainWindow::onLoginButtonClicked);
     connect(ui->registerDeviceButton, &QPushButton::clicked, this, &MainWindow::onRegisterDeviceButtonClicked);
     connect(ui->logoutButton, &QPushButton::clicked, this, &MainWindow::onLogoutButtonClicked);
+
+    // Dynamic UI addition for Sign Up
+    QPushButton *signUpButton = new QPushButton("Don't have an account? Sign Up", this);
+    connect(signUpButton, &QPushButton::clicked, this, &MainWindow::onSignUpButtonClicked);
+    // Add to the login group layout. The layout is a QGridLayout.
+    // We can access it via ui->loginGroup->layout() but need to cast or rely on QWidget::layout()
+    if (ui->loginGroup->layout()) {
+        ui->loginGroup->layout()->addWidget(signUpButton);
+    }
+}
+
+void MainWindow::onSignUpButtonClicked()
+{
+    SignUpDialog dialog(this);
+    dialog.exec();
 }
 
 MainWindow::~MainWindow()

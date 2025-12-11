@@ -45,6 +45,8 @@ add_executable(VpnDesktopClient
   src/vpn_client_core.h
   src/cryptomanager.cpp
   src/cryptomanager.h
+  src/signupdialog.cpp
+  src/signupdialog.h
 )
 
 # Add the recovery tool subdirectory to the build process

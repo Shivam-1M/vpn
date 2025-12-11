@@ -43,6 +43,7 @@ private slots:
     void fetchConfigAfterRegistration();
     void onReachabilityChanged(QNetworkInformation::Reachability reachability);
     void attemptReconnection();
+    void onSignUpButtonClicked();
 
 private:
     void loadOrGenerateKeys();
