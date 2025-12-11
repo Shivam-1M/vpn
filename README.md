@@ -15,13 +15,14 @@ The system supports user registration, device authentication, secure peer manage
 
 ## Features
 
-- User authentication with JWT tokens
+- User authentication with JWT tokens (including Email/Password Registration)
 - Device registration and management
 - Automatic IP address management (IPAM)
 - Secure gRPC communication between control and data planes
 - TLS-encrypted connections
-- Kill switch functionality to prevent IP leaks
-- Cross-platform desktop client
+- IPv6 Support (Planned)
+- Cross-platform Kill Switch (Windows & Linux) to prevent IP leaks
+- Cross-platform desktop client (Windows & Linux)
 - PostgreSQL database for persistent storage
 - Docker-based deployment for database
 
@@ -279,7 +280,6 @@ This project is currently in **development** (dev branch). Key features are impl
 
 - Limited error handling in some edge cases
 - No comprehensive test suite
-- Desktop client currently Linux-focused (may need Windows adaptations)
 - Database migrations not fully automated
 - No CI/CD pipeline
 - Documentation could be expanded
@@ -287,7 +287,7 @@ This project is currently in **development** (dev branch). Key features are impl
 ## Contributing
 
 1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+2. Create a feature branch (`git checkout -b feature/amazing-feature`). We follow a Feature Branch Workflow.
 3. Commit your changes (`git commit -m 'Add amazing feature'`)
 4. Push to the branch (`git push origin feature/amazing-feature`)
 5. Open a Pull Request
