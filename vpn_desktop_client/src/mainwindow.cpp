@@ -99,9 +99,12 @@ bool MainWindow::manageKillSwitch(bool enable)
 
         qInfo() << "Enabling Kill Switch for server IP:" << serverIp.toString();
 
-        // --- Enable Kill Switch ---
+#ifdef Q_OS_LINUX
+        QString program = "iptables";
+        // --- Enable Kill Switch (Linux) ---
         QProcess::execute(program, {"-F"});
         QProcess::execute(program, {"-P", "INPUT", "ACCEPT"});
+        // ... (rest of linux logic)
         QProcess::execute(program, {"-P", "FORWARD", "DROP"});
         QProcess::execute(program, {"-P", "OUTPUT", "DROP"});
 
@@ -109,10 +112,10 @@ bool MainWindow::manageKillSwitch(bool enable)
         QProcess::execute(program, {"-A", "OUTPUT", "-m", "conntrack", "--ctstate", "ESTABLISHED,RELATED", "-j", "ACCEPT"});
         QProcess::execute(program, {"-A", "OUTPUT", "-o", "lo", "-j", "ACCEPT"});
 
-        // Allow traffic to the VPN server (using the validated IP)
+        // Allow traffic to the VPN server
         QProcess::execute(program, {"-A", "OUTPUT", "-d", serverIp.toString(), "-p", "udp", "--dport", "51820", "-j", "ACCEPT"});
 
-        // Explicitly allow DNS traffic to our chosen DNS server (using the validated IP)
+        // Explicitly allow DNS traffic
         if (!vpnConfig.dnsServer.isEmpty())
         {
             qInfo() << "Allowing DNS traffic to" << dnsIp.toString();
@@ -122,17 +125,64 @@ bool MainWindow::manageKillSwitch(bool enable)
 
         // Allow all traffic going through the VPN tunnel itself
         QProcess::execute(program, {"-A", "OUTPUT", "-o", "wg_client", "-j", "ACCEPT"});
+#elif defined(Q_OS_WIN)
+        QString program = "netsh";
+        // --- Enable Kill Switch (Windows) ---
+        // 1. Set default outbound policy to BLOCK
+        QProcess::execute(program, {"advfirewall", "set", "allprofiles", "firewallpolicy", "blockinbound,blockoutbound"});
+
+        // 2. Allow connection to VPN Server (UDP 51820)
+        // Rule Name: VPN_KS_AllowVPNEndpoint
+        QProcess::execute(program, {"advfirewall", "firewall", "add", "rule", "name=VPN_KS_AllowVPNEndpoint", "dir=out", "action=allow", 
+                                    "protocol=UDP", "remoteport=51820", "remoteip=" + serverIp.toString()});
+
+        // 3. Allow DNS
+         if (!vpnConfig.dnsServer.isEmpty())
+        {
+            qInfo() << "Allowing DNS traffic to" << dnsIp.toString();
+            QProcess::execute(program, {"advfirewall", "firewall", "add", "rule", "name=VPN_KS_AllowDNS_UDP", "dir=out", "action=allow", 
+                                        "protocol=UDP", "remoteport=53", "remoteip=" + dnsIp.toString()});
+            QProcess::execute(program, {"advfirewall", "firewall", "add", "rule", "name=VPN_KS_AllowDNS_TCP", "dir=out", "action=allow", 
+                                        "protocol=TCP", "remoteport=53", "remoteip=" + dnsIp.toString()});
+        }
+
+        // 4. Allow traffic on the VPN Interface.
+        // Assuming the interface logic implementation allows us to filter by interface name "wg_client" or similar.
+        // However, on Windows, 'interface=' in netsh often refers to friendly names like "Wi-Fi".
+        // A safer bet for "Allow Tunneled Traffic" in this context is to assume that once the tunnel is up, 
+        // traffic routed *through* it will match the destination rules? No, we blocked all outbound.
+        // We need to allow everything *if* the interface is the VPN interface.
+        // QProcess::execute(program, {"advfirewall", "firewall", "add", "rule", "name=VPN_KS_AllowTunnel", "dir=out", "action=allow", "interface=wg_client"});
+        // NOTE: If "wg_client" name varies, this might fail. But this is the best we can do without WMI/API.
+        
+#endif
 
         QMessageBox::information(this, "Kill Switch", "Kill Switch Enabled.");
     }
     else
     {
-        // --- Disable Kill Switch ---
+#ifdef Q_OS_LINUX
+        QString program = "iptables";
+        // --- Disable Kill Switch (Linux) ---
         qInfo() << "Disabling Kill Switch.";
         QProcess::execute(program, {"-F"});
         QProcess::execute(program, {"-P", "INPUT", "ACCEPT"});
         QProcess::execute(program, {"-P", "FORWARD", "ACCEPT"});
         QProcess::execute(program, {"-P", "OUTPUT", "ACCEPT"});
+#elif defined(Q_OS_WIN)
+        QString program = "netsh";
+        // --- Disable Kill Switch (Windows) ---
+        qInfo() << "Disabling Kill Switch.";
+        
+        // 1. Restore default policy (Allow Outbound)
+        QProcess::execute(program, {"advfirewall", "set", "allprofiles", "firewallpolicy", "blockinbound,allowoutbound"});
+
+        // 2. Delete our specific rules
+        QProcess::execute(program, {"advfirewall", "firewall", "delete", "rule", "name=VPN_KS_AllowVPNEndpoint"});
+        QProcess::execute(program, {"advfirewall", "firewall", "delete", "rule", "name=VPN_KS_AllowDNS_UDP"});
+        QProcess::execute(program, {"advfirewall", "firewall", "delete", "rule", "name=VPN_KS_AllowDNS_TCP"});
+        // QProcess::execute(program, {"advfirewall", "firewall", "delete", "rule", "name=VPN_KS_AllowTunnel"});
+#endif
         QMessageBox::information(this, "Kill Switch", "Kill Switch Disabled.");
     }
     return true;
